@@ -1,0 +1,199 @@
+{
+ "config": {
+  "graph": "hamster",
+  "sizes": [
+   8,
+   10,
+   12
+  ],
+  "densities": [
+   "dense",
+   "sparse"
+  ],
+  "count": 20,
+  "seed": 12345,
+  "filter": "nlf",
+  "order": "gql",
+  "oracle_depth": 3,
+  "max_depth": 10,
+  "checkpoint": null,
+  "device": "cpu",
+  "enum_budget": 5000000,
+  "search_budget": 1000000,
+  "limit": 20,
+  "tag": null
+ },
+ "query_set": {
+  "seed": 12345037156
+ },
+ "summary": {
+  "queries": 20,
+  "labeled": 0,
+  "skipped": 20,
+  "baseline": {
+   "solved": 0,
+   "median_fms": NaN,
+   "median_steps": NaN
+  },
+  "oracle_p": {
+   "solved": 0,
+   "median_fms": NaN
+  },
+  "oracle_1c": {
+   "solved": 0,
+   "median_fms": NaN
+  },
+  "oracle_pc": {
+   "solved": 0,
+   "median_fms": NaN
+  },
+  "vs_baseline": {
+   "oracle_p": {
+    "better": 0,
+    "worse": 0,
+    "tied": 0,
+    "n": 0,
+    "geomean": NaN
+   },
+   "oracle_1c": {
+    "better": 0,
+    "worse": 0,
+    "tied": 0,
+    "n": 0,
+    "geomean": NaN
+   },
+   "oracle_pc": {
+    "better": 0,
+    "worse": 0,
+    "tied": 0,
+    "n": 0,
+    "geomean": NaN
+   }
+  },
+  "median_label_steps": NaN,
+  "median_root_candidates": NaN,
+  "median_root_solvable": NaN
+ },
+ "records": [
+  {
+   "n": 12,
+   "m": 17,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 12,
+   "m": 13,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 12,
+   "m": 14,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 12,
+   "m": 14,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 12,
+   "m": 17,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 12,
+   "m": 17,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 12,
+   "m": 17,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 12,
+   "m": 15,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 12,
+   "m": 15,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 12,
+   "m": 17,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 12,
+   "m": 17,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 12,
+   "m": 15,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 12,
+   "m": 15,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 12,
+   "m": 17,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 12,
+   "m": 15,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 12,
+   "m": 16,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 12,
+   "m": 17,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 12,
+   "m": 16,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 12,
+   "m": 17,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 12,
+   "m": 15,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  }
+ ]
+}

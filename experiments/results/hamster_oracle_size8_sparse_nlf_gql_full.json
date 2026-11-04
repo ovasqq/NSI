@@ -1,0 +1,1419 @@
+{
+ "config": {
+  "graph": "hamster",
+  "sizes": [
+   8
+  ],
+  "densities": [
+   "sparse"
+  ],
+  "count": 100,
+  "seed": 12345,
+  "filter": "nlf",
+  "order": "gql",
+  "oracle_depth": 3,
+  "max_depth": 10,
+  "checkpoint": "checkpoints/hamster/paper/model.pt",
+  "device": "cpu",
+  "enum_budget": 5000000,
+  "search_budget": 1000000,
+  "limit": null,
+  "tag": "full"
+ },
+ "query_set": {
+  "seed": 12345037115
+ },
+ "summary": {
+  "queries": 100,
+  "labeled": 27,
+  "skipped": 73,
+  "baseline": {
+   "solved": 27,
+   "median_fms": 12,
+   "median_steps": 12
+  },
+  "neugn": {
+   "solved": 27,
+   "median_fms": 8
+  },
+  "oracle_p": {
+   "solved": 27,
+   "median_fms": 8
+  },
+  "oracle_1c": {
+   "solved": 27,
+   "median_fms": 22
+  },
+  "oracle_pc": {
+   "solved": 27,
+   "median_fms": 8
+  },
+  "vs_baseline": {
+   "neugn": {
+    "better": 16,
+    "worse": 4,
+    "tied": 7,
+    "n": 27,
+    "geomean": 0.7205096113617121
+   },
+   "oracle_p": {
+    "better": 13,
+    "worse": 0,
+    "tied": 14,
+    "n": 27,
+    "geomean": 0.6038924159773985
+   },
+   "oracle_1c": {
+    "better": 2,
+    "worse": 20,
+    "tied": 5,
+    "n": 27,
+    "geomean": 2.2790632008541327
+   },
+   "oracle_pc": {
+    "better": 16,
+    "worse": 1,
+    "tied": 10,
+    "n": 27,
+    "geomean": 0.5855117278188767
+   }
+  },
+  "vs_neugn": {
+   "baseline": {
+    "better": 4,
+    "worse": 16,
+    "tied": 7,
+    "n": 27,
+    "geomean": 1.387906537582574
+   },
+   "oracle_p": {
+    "better": 10,
+    "worse": 6,
+    "tied": 11,
+    "n": 27,
+    "geomean": 0.8381462321315668
+   },
+   "oracle_1c": {
+    "better": 1,
+    "worse": 24,
+    "tied": 2,
+    "n": 27,
+    "geomean": 3.163126716029318
+   },
+   "oracle_pc": {
+    "better": 10,
+    "worse": 8,
+    "tied": 9,
+    "n": 27,
+    "geomean": 0.8126355548710879
+   }
+  },
+  "median_label_steps": 133685,
+  "median_root_candidates": 5,
+  "median_root_solvable": 5
+ },
+ "records": [
+  {
+   "n": 8,
+   "m": 8,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 8,
+   "m": 9,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 8,
+   "m": 7,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 8,
+   "m": 9,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 8,
+   "m": 10,
+   "label_steps": 161679,
+   "root_candidates": 1,
+   "root_solvable": 1,
+   "baseline": {
+    "fms": 16,
+    "steps": 16,
+    "complete": false
+   },
+   "neugn": {
+    "fms": 8,
+    "steps": 8,
+    "complete": false
+   },
+   "oracle_p": {
+    "fms": 16,
+    "steps": 16,
+    "complete": false
+   },
+   "oracle_1c": {
+    "fms": 10,
+    "steps": 10,
+    "complete": false
+   },
+   "oracle_pc": {
+    "fms": 10,
+    "steps": 10,
+    "complete": false
+   }
+  },
+  {
+   "n": 8,
+   "m": 10,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 8,
+   "m": 11,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 8,
+   "m": 11,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 8,
+   "m": 9,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 8,
+   "m": 11,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 8,
+   "m": 8,
+   "label_steps": 18610,
+   "root_candidates": 4,
+   "root_solvable": 4,
+   "baseline": {
+    "fms": 9,
+    "steps": 9,
+    "complete": false
+   },
+   "neugn": {
+    "fms": 79,
+    "steps": 79,
+    "complete": false
+   },
+   "oracle_p": {
+    "fms": 9,
+    "steps": 9,
+    "complete": false
+   },
+   "oracle_1c": {
+    "fms": 70,
+    "steps": 70,
+    "complete": false
+   },
+   "oracle_pc": {
+    "fms": 8,
+    "steps": 8,
+    "complete": false
+   }
+  },
+  {
+   "n": 8,
+   "m": 10,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 8,
+   "m": 10,
+   "label_steps": 2367799,
+   "root_candidates": 21,
+   "root_solvable": 21,
+   "baseline": {
+    "fms": 8,
+    "steps": 8,
+    "complete": false
+   },
+   "neugn": {
+    "fms": 8,
+    "steps": 8,
+    "complete": false
+   },
+   "oracle_p": {
+    "fms": 8,
+    "steps": 8,
+    "complete": false
+   },
+   "oracle_1c": {
+    "fms": 11,
+    "steps": 11,
+    "complete": false
+   },
+   "oracle_pc": {
+    "fms": 8,
+    "steps": 8,
+    "complete": false
+   }
+  },
+  {
+   "n": 8,
+   "m": 9,
+   "label_steps": 67949,
+   "root_candidates": 6,
+   "root_solvable": 6,
+   "baseline": {
+    "fms": 11,
+    "steps": 11,
+    "complete": false
+   },
+   "neugn": {
+    "fms": 8,
+    "steps": 8,
+    "complete": false
+   },
+   "oracle_p": {
+    "fms": 11,
+    "steps": 11,
+    "complete": false
+   },
+   "oracle_1c": {
+    "fms": 17,
+    "steps": 17,
+    "complete": false
+   },
+   "oracle_pc": {
+    "fms": 17,
+    "steps": 17,
+    "complete": false
+   }
+  },
+  {
+   "n": 8,
+   "m": 9,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 8,
+   "m": 11,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 8,
+   "m": 11,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 8,
+   "m": 8,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 8,
+   "m": 10,
+   "label_steps": 16154,
+   "root_candidates": 1,
+   "root_solvable": 1,
+   "baseline": {
+    "fms": 8,
+    "steps": 8,
+    "complete": false
+   },
+   "neugn": {
+    "fms": 26,
+    "steps": 26,
+    "complete": false
+   },
+   "oracle_p": {
+    "fms": 8,
+    "steps": 8,
+    "complete": false
+   },
+   "oracle_1c": {
+    "fms": 261,
+    "steps": 261,
+    "complete": false
+   },
+   "oracle_pc": {
+    "fms": 8,
+    "steps": 8,
+    "complete": false
+   }
+  },
+  {
+   "n": 8,
+   "m": 10,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 8,
+   "m": 8,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 8,
+   "m": 11,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 8,
+   "m": 9,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 8,
+   "m": 9,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 8,
+   "m": 9,
+   "label_steps": 3669109,
+   "root_candidates": 20,
+   "root_solvable": 20,
+   "baseline": {
+    "fms": 8,
+    "steps": 8,
+    "complete": false
+   },
+   "neugn": {
+    "fms": 90,
+    "steps": 90,
+    "complete": false
+   },
+   "oracle_p": {
+    "fms": 8,
+    "steps": 8,
+    "complete": false
+   },
+   "oracle_1c": {
+    "fms": 294,
+    "steps": 294,
+    "complete": false
+   },
+   "oracle_pc": {
+    "fms": 8,
+    "steps": 8,
+    "complete": false
+   }
+  },
+  {
+   "n": 8,
+   "m": 10,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 8,
+   "m": 8,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 8,
+   "m": 9,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 8,
+   "m": 11,
+   "label_steps": 2091343,
+   "root_candidates": 42,
+   "root_solvable": 42,
+   "baseline": {
+    "fms": 17,
+    "steps": 17,
+    "complete": false
+   },
+   "neugn": {
+    "fms": 8,
+    "steps": 8,
+    "complete": false
+   },
+   "oracle_p": {
+    "fms": 8,
+    "steps": 8,
+    "complete": false
+   },
+   "oracle_1c": {
+    "fms": 66,
+    "steps": 66,
+    "complete": false
+   },
+   "oracle_pc": {
+    "fms": 13,
+    "steps": 13,
+    "complete": false
+   }
+  },
+  {
+   "n": 8,
+   "m": 8,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 8,
+   "m": 7,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 8,
+   "m": 9,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 8,
+   "m": 7,
+   "label_steps": 652150,
+   "root_candidates": 18,
+   "root_solvable": 18,
+   "baseline": {
+    "fms": 10,
+    "steps": 10,
+    "complete": false
+   },
+   "neugn": {
+    "fms": 8,
+    "steps": 8,
+    "complete": false
+   },
+   "oracle_p": {
+    "fms": 8,
+    "steps": 8,
+    "complete": false
+   },
+   "oracle_1c": {
+    "fms": 88,
+    "steps": 88,
+    "complete": false
+   },
+   "oracle_pc": {
+    "fms": 8,
+    "steps": 8,
+    "complete": false
+   }
+  },
+  {
+   "n": 8,
+   "m": 9,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 8,
+   "m": 9,
+   "label_steps": 13,
+   "root_candidates": 1,
+   "root_solvable": 1,
+   "baseline": {
+    "fms": 8,
+    "steps": 8,
+    "complete": false
+   },
+   "neugn": {
+    "fms": 8,
+    "steps": 8,
+    "complete": false
+   },
+   "oracle_p": {
+    "fms": 8,
+    "steps": 8,
+    "complete": false
+   },
+   "oracle_1c": {
+    "fms": 8,
+    "steps": 8,
+    "complete": false
+   },
+   "oracle_pc": {
+    "fms": 8,
+    "steps": 8,
+    "complete": false
+   }
+  },
+  {
+   "n": 8,
+   "m": 8,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 8,
+   "m": 11,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 8,
+   "m": 8,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 8,
+   "m": 9,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 8,
+   "m": 8,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 8,
+   "m": 11,
+   "label_steps": 2143,
+   "root_candidates": 9,
+   "root_solvable": 9,
+   "baseline": {
+    "fms": 8,
+    "steps": 8,
+    "complete": false
+   },
+   "neugn": {
+    "fms": 8,
+    "steps": 8,
+    "complete": false
+   },
+   "oracle_p": {
+    "fms": 8,
+    "steps": 8,
+    "complete": false
+   },
+   "oracle_1c": {
+    "fms": 51,
+    "steps": 51,
+    "complete": false
+   },
+   "oracle_pc": {
+    "fms": 8,
+    "steps": 8,
+    "complete": false
+   }
+  },
+  {
+   "n": 8,
+   "m": 10,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 8,
+   "m": 9,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 8,
+   "m": 11,
+   "label_steps": 18135,
+   "root_candidates": 5,
+   "root_solvable": 5,
+   "baseline": {
+    "fms": 506,
+    "steps": 506,
+    "complete": false
+   },
+   "neugn": {
+    "fms": 9,
+    "steps": 9,
+    "complete": false
+   },
+   "oracle_p": {
+    "fms": 8,
+    "steps": 8,
+    "complete": false
+   },
+   "oracle_1c": {
+    "fms": 508,
+    "steps": 508,
+    "complete": false
+   },
+   "oracle_pc": {
+    "fms": 8,
+    "steps": 8,
+    "complete": false
+   }
+  },
+  {
+   "n": 8,
+   "m": 9,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 8,
+   "m": 8,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 8,
+   "m": 8,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 8,
+   "m": 11,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 8,
+   "m": 8,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 8,
+   "m": 11,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 8,
+   "m": 10,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 8,
+   "m": 9,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 8,
+   "m": 9,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 8,
+   "m": 10,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 8,
+   "m": 10,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 8,
+   "m": 11,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 8,
+   "m": 10,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 8,
+   "m": 10,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 8,
+   "m": 9,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 8,
+   "m": 7,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 8,
+   "m": 10,
+   "label_steps": 1597,
+   "root_candidates": 5,
+   "root_solvable": 5,
+   "baseline": {
+    "fms": 11,
+    "steps": 11,
+    "complete": false
+   },
+   "neugn": {
+    "fms": 9,
+    "steps": 9,
+    "complete": false
+   },
+   "oracle_p": {
+    "fms": 8,
+    "steps": 8,
+    "complete": false
+   },
+   "oracle_1c": {
+    "fms": 17,
+    "steps": 17,
+    "complete": false
+   },
+   "oracle_pc": {
+    "fms": 8,
+    "steps": 8,
+    "complete": false
+   }
+  },
+  {
+   "n": 8,
+   "m": 8,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 8,
+   "m": 8,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 8,
+   "m": 8,
+   "label_steps": 4356999,
+   "root_candidates": 25,
+   "root_solvable": 25,
+   "baseline": {
+    "fms": 8,
+    "steps": 8,
+    "complete": false
+   },
+   "neugn": {
+    "fms": 8,
+    "steps": 8,
+    "complete": false
+   },
+   "oracle_p": {
+    "fms": 8,
+    "steps": 8,
+    "complete": false
+   },
+   "oracle_1c": {
+    "fms": 11,
+    "steps": 11,
+    "complete": false
+   },
+   "oracle_pc": {
+    "fms": 8,
+    "steps": 8,
+    "complete": false
+   }
+  },
+  {
+   "n": 8,
+   "m": 9,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 8,
+   "m": 8,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 8,
+   "m": 10,
+   "label_steps": 94,
+   "root_candidates": 3,
+   "root_solvable": 3,
+   "baseline": {
+    "fms": 22,
+    "steps": 22,
+    "complete": false
+   },
+   "neugn": {
+    "fms": 8,
+    "steps": 8,
+    "complete": false
+   },
+   "oracle_p": {
+    "fms": 9,
+    "steps": 9,
+    "complete": false
+   },
+   "oracle_1c": {
+    "fms": 22,
+    "steps": 22,
+    "complete": false
+   },
+   "oracle_pc": {
+    "fms": 9,
+    "steps": 9,
+    "complete": false
+   }
+  },
+  {
+   "n": 8,
+   "m": 11,
+   "label_steps": 1627900,
+   "root_candidates": 24,
+   "root_solvable": 24,
+   "baseline": {
+    "fms": 8,
+    "steps": 8,
+    "complete": false
+   },
+   "neugn": {
+    "fms": 8,
+    "steps": 8,
+    "complete": false
+   },
+   "oracle_p": {
+    "fms": 8,
+    "steps": 8,
+    "complete": false
+   },
+   "oracle_1c": {
+    "fms": 62,
+    "steps": 62,
+    "complete": false
+   },
+   "oracle_pc": {
+    "fms": 8,
+    "steps": 8,
+    "complete": false
+   }
+  },
+  {
+   "n": 8,
+   "m": 9,
+   "label_steps": 698,
+   "root_candidates": 1,
+   "root_solvable": 1,
+   "baseline": {
+    "fms": 12,
+    "steps": 12,
+    "complete": false
+   },
+   "neugn": {
+    "fms": 8,
+    "steps": 8,
+    "complete": false
+   },
+   "oracle_p": {
+    "fms": 12,
+    "steps": 12,
+    "complete": false
+   },
+   "oracle_1c": {
+    "fms": 12,
+    "steps": 12,
+    "complete": false
+   },
+   "oracle_pc": {
+    "fms": 12,
+    "steps": 12,
+    "complete": false
+   }
+  },
+  {
+   "n": 8,
+   "m": 9,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 8,
+   "m": 10,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 8,
+   "m": 8,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 8,
+   "m": 7,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 8,
+   "m": 10,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 8,
+   "m": 8,
+   "label_steps": 12746,
+   "root_candidates": 4,
+   "root_solvable": 4,
+   "baseline": {
+    "fms": 8,
+    "steps": 8,
+    "complete": false
+   },
+   "neugn": {
+    "fms": 8,
+    "steps": 8,
+    "complete": false
+   },
+   "oracle_p": {
+    "fms": 8,
+    "steps": 8,
+    "complete": false
+   },
+   "oracle_1c": {
+    "fms": 9,
+    "steps": 9,
+    "complete": false
+   },
+   "oracle_pc": {
+    "fms": 8,
+    "steps": 8,
+    "complete": false
+   }
+  },
+  {
+   "n": 8,
+   "m": 11,
+   "label_steps": 2508621,
+   "root_candidates": 13,
+   "root_solvable": 13,
+   "baseline": {
+    "fms": 172,
+    "steps": 172,
+    "complete": false
+   },
+   "neugn": {
+    "fms": 14,
+    "steps": 14,
+    "complete": false
+   },
+   "oracle_p": {
+    "fms": 8,
+    "steps": 8,
+    "complete": false
+   },
+   "oracle_1c": {
+    "fms": 206,
+    "steps": 206,
+    "complete": false
+   },
+   "oracle_pc": {
+    "fms": 8,
+    "steps": 8,
+    "complete": false
+   }
+  },
+  {
+   "n": 8,
+   "m": 8,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 8,
+   "m": 10,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 8,
+   "m": 8,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 8,
+   "m": 9,
+   "label_steps": 133685,
+   "root_candidates": 5,
+   "root_solvable": 5,
+   "baseline": {
+    "fms": 13,
+    "steps": 13,
+    "complete": false
+   },
+   "neugn": {
+    "fms": 10,
+    "steps": 10,
+    "complete": false
+   },
+   "oracle_p": {
+    "fms": 8,
+    "steps": 8,
+    "complete": false
+   },
+   "oracle_1c": {
+    "fms": 15,
+    "steps": 15,
+    "complete": false
+   },
+   "oracle_pc": {
+    "fms": 8,
+    "steps": 8,
+    "complete": false
+   }
+  },
+  {
+   "n": 8,
+   "m": 9,
+   "label_steps": 992414,
+   "root_candidates": 27,
+   "root_solvable": 27,
+   "baseline": {
+    "fms": 18,
+    "steps": 18,
+    "complete": false
+   },
+   "neugn": {
+    "fms": 8,
+    "steps": 8,
+    "complete": false
+   },
+   "oracle_p": {
+    "fms": 8,
+    "steps": 8,
+    "complete": false
+   },
+   "oracle_1c": {
+    "fms": 81,
+    "steps": 81,
+    "complete": false
+   },
+   "oracle_pc": {
+    "fms": 8,
+    "steps": 8,
+    "complete": false
+   }
+  },
+  {
+   "n": 8,
+   "m": 9,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 8,
+   "m": 10,
+   "label_steps": 2503394,
+   "root_candidates": 52,
+   "root_solvable": 52,
+   "baseline": {
+    "fms": 55,
+    "steps": 55,
+    "complete": false
+   },
+   "neugn": {
+    "fms": 8,
+    "steps": 8,
+    "complete": false
+   },
+   "oracle_p": {
+    "fms": 55,
+    "steps": 55,
+    "complete": false
+   },
+   "oracle_1c": {
+    "fms": 207,
+    "steps": 207,
+    "complete": false
+   },
+   "oracle_pc": {
+    "fms": 14,
+    "steps": 14,
+    "complete": false
+   }
+  },
+  {
+   "n": 8,
+   "m": 9,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 8,
+   "m": 11,
+   "label_steps": 383124,
+   "root_candidates": 14,
+   "root_solvable": 14,
+   "baseline": {
+    "fms": 12,
+    "steps": 12,
+    "complete": false
+   },
+   "neugn": {
+    "fms": 8,
+    "steps": 8,
+    "complete": false
+   },
+   "oracle_p": {
+    "fms": 9,
+    "steps": 9,
+    "complete": false
+   },
+   "oracle_1c": {
+    "fms": 26,
+    "steps": 26,
+    "complete": false
+   },
+   "oracle_pc": {
+    "fms": 9,
+    "steps": 9,
+    "complete": false
+   }
+  },
+  {
+   "n": 8,
+   "m": 8,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 8,
+   "m": 10,
+   "label_steps": 1826,
+   "root_candidates": 3,
+   "root_solvable": 3,
+   "baseline": {
+    "fms": 13,
+    "steps": 13,
+    "complete": false
+   },
+   "neugn": {
+    "fms": 8,
+    "steps": 8,
+    "complete": false
+   },
+   "oracle_p": {
+    "fms": 8,
+    "steps": 8,
+    "complete": false
+   },
+   "oracle_1c": {
+    "fms": 16,
+    "steps": 16,
+    "complete": false
+   },
+   "oracle_pc": {
+    "fms": 11,
+    "steps": 11,
+    "complete": false
+   }
+  },
+  {
+   "n": 8,
+   "m": 11,
+   "label_steps": 42919,
+   "root_candidates": 4,
+   "root_solvable": 4,
+   "baseline": {
+    "fms": 13,
+    "steps": 13,
+    "complete": false
+   },
+   "neugn": {
+    "fms": 9,
+    "steps": 9,
+    "complete": false
+   },
+   "oracle_p": {
+    "fms": 8,
+    "steps": 8,
+    "complete": false
+   },
+   "oracle_1c": {
+    "fms": 13,
+    "steps": 13,
+    "complete": false
+   },
+   "oracle_pc": {
+    "fms": 8,
+    "steps": 8,
+    "complete": false
+   }
+  },
+  {
+   "n": 8,
+   "m": 8,
+   "label_steps": 574308,
+   "root_candidates": 4,
+   "root_solvable": 4,
+   "baseline": {
+    "fms": 18,
+    "steps": 18,
+    "complete": false
+   },
+   "neugn": {
+    "fms": 19,
+    "steps": 19,
+    "complete": false
+   },
+   "oracle_p": {
+    "fms": 8,
+    "steps": 8,
+    "complete": false
+   },
+   "oracle_1c": {
+    "fms": 29,
+    "steps": 29,
+    "complete": false
+   },
+   "oracle_pc": {
+    "fms": 8,
+    "steps": 8,
+    "complete": false
+   }
+  },
+  {
+   "n": 8,
+   "m": 9,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 8,
+   "m": 10,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 8,
+   "m": 7,
+   "label_steps": 3251408,
+   "root_candidates": 2,
+   "root_solvable": 2,
+   "baseline": {
+    "fms": 8,
+    "steps": 8,
+    "complete": false
+   },
+   "neugn": {
+    "fms": 8,
+    "steps": 8,
+    "complete": false
+   },
+   "oracle_p": {
+    "fms": 8,
+    "steps": 8,
+    "complete": false
+   },
+   "oracle_1c": {
+    "fms": 8,
+    "steps": 8,
+    "complete": false
+   },
+   "oracle_pc": {
+    "fms": 8,
+    "steps": 8,
+    "complete": false
+   }
+  },
+  {
+   "n": 8,
+   "m": 11,
+   "label_steps": 3083,
+   "root_candidates": 9,
+   "root_solvable": 9,
+   "baseline": {
+    "fms": 21,
+    "steps": 21,
+    "complete": false
+   },
+   "neugn": {
+    "fms": 16,
+    "steps": 16,
+    "complete": false
+   },
+   "oracle_p": {
+    "fms": 9,
+    "steps": 9,
+    "complete": false
+   },
+   "oracle_1c": {
+    "fms": 19,
+    "steps": 19,
+    "complete": false
+   },
+   "oracle_pc": {
+    "fms": 8,
+    "steps": 8,
+    "complete": false
+   }
+  },
+  {
+   "n": 8,
+   "m": 9,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 8,
+   "m": 8,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 8,
+   "m": 9,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 8,
+   "m": 9,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 8,
+   "m": 8,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 8,
+   "m": 7,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 8,
+   "m": 9,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  }
+ ]
+}

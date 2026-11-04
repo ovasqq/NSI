@@ -1,0 +1,241 @@
+{
+ "config": {
+  "graph": "hamster",
+  "sizes": [
+   8,
+   10,
+   12
+  ],
+  "densities": [
+   "dense",
+   "sparse"
+  ],
+  "count": 20,
+  "seed": 12345,
+  "filter": "nlf",
+  "order": "gql",
+  "oracle_depth": 3,
+  "max_depth": 10,
+  "checkpoint": null,
+  "device": "cpu",
+  "enum_budget": 5000000,
+  "search_budget": 1000000,
+  "limit": 20,
+  "tag": null
+ },
+ "query_set": {
+  "seed": 12345037155
+ },
+ "summary": {
+  "queries": 20,
+  "labeled": 2,
+  "skipped": 18,
+  "baseline": {
+   "solved": 2,
+   "median_fms": 35.0,
+   "median_steps": 35.0
+  },
+  "oracle_p": {
+   "solved": 2,
+   "median_fms": 16.0
+  },
+  "oracle_1c": {
+   "solved": 2,
+   "median_fms": 188.0
+  },
+  "oracle_pc": {
+   "solved": 2,
+   "median_fms": 15.5
+  },
+  "vs_baseline": {
+   "oracle_p": {
+    "better": 2,
+    "worse": 0,
+    "tied": 0,
+    "n": 2,
+    "geomean": 0.4693396640810579
+   },
+   "oracle_1c": {
+    "better": 0,
+    "worse": 2,
+    "tied": 0,
+    "n": 2,
+    "geomean": 5.296703685318817
+   },
+   "oracle_pc": {
+    "better": 2,
+    "worse": 0,
+    "tied": 0,
+    "n": 2,
+    "geomean": 0.45611616726658355
+   }
+  },
+  "median_label_steps": 1164672.5,
+  "median_root_candidates": 6.5,
+  "median_root_solvable": 6.5
+ },
+ "records": [
+  {
+   "n": 12,
+   "m": 33,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 12,
+   "m": 20,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 12,
+   "m": 19,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 12,
+   "m": 21,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 12,
+   "m": 19,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 12,
+   "m": 31,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 12,
+   "m": 24,
+   "label_steps": 134150,
+   "root_candidates": 4,
+   "root_solvable": 4,
+   "baseline": {
+    "fms": 44,
+    "steps": 44,
+    "complete": false
+   },
+   "oracle_p": {
+    "fms": 14,
+    "steps": 14,
+    "complete": false
+   },
+   "oracle_1c": {
+    "fms": 245,
+    "steps": 245,
+    "complete": false
+   },
+   "oracle_pc": {
+    "fms": 14,
+    "steps": 14,
+    "complete": false
+   }
+  },
+  {
+   "n": 12,
+   "m": 24,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 12,
+   "m": 20,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 12,
+   "m": 24,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 12,
+   "m": 26,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 12,
+   "m": 20,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 12,
+   "m": 23,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 12,
+   "m": 31,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 12,
+   "m": 20,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 12,
+   "m": 21,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 12,
+   "m": 29,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 12,
+   "m": 18,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 12,
+   "m": 26,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 12,
+   "m": 26,
+   "label_steps": 2195195,
+   "root_candidates": 9,
+   "root_solvable": 9,
+   "baseline": {
+    "fms": 26,
+    "steps": 26,
+    "complete": false
+   },
+   "oracle_p": {
+    "fms": 18,
+    "steps": 18,
+    "complete": false
+   },
+   "oracle_1c": {
+    "fms": 131,
+    "steps": 131,
+    "complete": false
+   },
+   "oracle_pc": {
+    "fms": 17,
+    "steps": 17,
+    "complete": false
+   }
+  }
+ ]
+}

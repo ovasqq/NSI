@@ -1,0 +1,367 @@
+{
+ "config": {
+  "graph": "hamster",
+  "sizes": [
+   8,
+   10,
+   12
+  ],
+  "densities": [
+   "dense",
+   "sparse"
+  ],
+  "count": 20,
+  "seed": 12345,
+  "filter": "nlf",
+  "order": "gql",
+  "oracle_depth": 3,
+  "max_depth": 10,
+  "checkpoint": null,
+  "device": "cpu",
+  "enum_budget": 5000000,
+  "search_budget": 1000000,
+  "limit": 20,
+  "tag": null
+ },
+ "query_set": {
+  "seed": 12345037135
+ },
+ "summary": {
+  "queries": 20,
+  "labeled": 8,
+  "skipped": 12,
+  "baseline": {
+   "solved": 8,
+   "median_fms": 23.5,
+   "median_steps": 23.5
+  },
+  "oracle_p": {
+   "solved": 8,
+   "median_fms": 10.0
+  },
+  "oracle_1c": {
+   "solved": 8,
+   "median_fms": 185.5
+  },
+  "oracle_pc": {
+   "solved": 8,
+   "median_fms": 10.0
+  },
+  "vs_baseline": {
+   "oracle_p": {
+    "better": 5,
+    "worse": 0,
+    "tied": 3,
+    "n": 8,
+    "geomean": 0.33409945305566924
+   },
+   "oracle_1c": {
+    "better": 0,
+    "worse": 7,
+    "tied": 1,
+    "n": 8,
+    "geomean": 3.6724080575677234
+   },
+   "oracle_pc": {
+    "better": 6,
+    "worse": 0,
+    "tied": 2,
+    "n": 8,
+    "geomean": 0.312150917710568
+   }
+  },
+  "median_label_steps": 21100.5,
+  "median_root_candidates": 8.5,
+  "median_root_solvable": 8.5
+ },
+ "records": [
+  {
+   "n": 10,
+   "m": 38,
+   "label_steps": 187914,
+   "root_candidates": 11,
+   "root_solvable": 11,
+   "baseline": {
+    "fms": 31,
+    "steps": 31,
+    "complete": false
+   },
+   "oracle_p": {
+    "fms": 31,
+    "steps": 31,
+    "complete": false
+   },
+   "oracle_1c": {
+    "fms": 131,
+    "steps": 131,
+    "complete": false
+   },
+   "oracle_pc": {
+    "fms": 10,
+    "steps": 10,
+    "complete": false
+   }
+  },
+  {
+   "n": 10,
+   "m": 15,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 10,
+   "m": 17,
+   "label_steps": 34850,
+   "root_candidates": 11,
+   "root_solvable": 11,
+   "baseline": {
+    "fms": 323,
+    "steps": 323,
+    "complete": false
+   },
+   "oracle_p": {
+    "fms": 10,
+    "steps": 10,
+    "complete": false
+   },
+   "oracle_1c": {
+    "fms": 463,
+    "steps": 463,
+    "complete": false
+   },
+   "oracle_pc": {
+    "fms": 10,
+    "steps": 10,
+    "complete": false
+   }
+  },
+  {
+   "n": 10,
+   "m": 20,
+   "label_steps": 5356,
+   "root_candidates": 4,
+   "root_solvable": 4,
+   "baseline": {
+    "fms": 10,
+    "steps": 10,
+    "complete": false
+   },
+   "oracle_p": {
+    "fms": 10,
+    "steps": 10,
+    "complete": false
+   },
+   "oracle_1c": {
+    "fms": 44,
+    "steps": 44,
+    "complete": false
+   },
+   "oracle_pc": {
+    "fms": 10,
+    "steps": 10,
+    "complete": false
+   }
+  },
+  {
+   "n": 10,
+   "m": 19,
+   "label_steps": 6416,
+   "root_candidates": 1,
+   "root_solvable": 1,
+   "baseline": {
+    "fms": 13,
+    "steps": 13,
+    "complete": false
+   },
+   "oracle_p": {
+    "fms": 10,
+    "steps": 10,
+    "complete": false
+   },
+   "oracle_1c": {
+    "fms": 13,
+    "steps": 13,
+    "complete": false
+   },
+   "oracle_pc": {
+    "fms": 10,
+    "steps": 10,
+    "complete": false
+   }
+  },
+  {
+   "n": 10,
+   "m": 20,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 10,
+   "m": 18,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 10,
+   "m": 17,
+   "label_steps": 1857,
+   "root_candidates": 3,
+   "root_solvable": 3,
+   "baseline": {
+    "fms": 10,
+    "steps": 10,
+    "complete": false
+   },
+   "oracle_p": {
+    "fms": 10,
+    "steps": 10,
+    "complete": false
+   },
+   "oracle_1c": {
+    "fms": 578,
+    "steps": 578,
+    "complete": false
+   },
+   "oracle_pc": {
+    "fms": 10,
+    "steps": 10,
+    "complete": false
+   }
+  },
+  {
+   "n": 10,
+   "m": 18,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 10,
+   "m": 21,
+   "label_steps": 834996,
+   "root_candidates": 19,
+   "root_solvable": 19,
+   "baseline": {
+    "fms": 188,
+    "steps": 188,
+    "complete": false
+   },
+   "oracle_p": {
+    "fms": 10,
+    "steps": 10,
+    "complete": false
+   },
+   "oracle_1c": {
+    "fms": 259,
+    "steps": 259,
+    "complete": false
+   },
+   "oracle_pc": {
+    "fms": 18,
+    "steps": 18,
+    "complete": false
+   }
+  },
+  {
+   "n": 10,
+   "m": 20,
+   "label_steps": 23095,
+   "root_candidates": 6,
+   "root_solvable": 6,
+   "baseline": {
+    "fms": 16,
+    "steps": 16,
+    "complete": false
+   },
+   "oracle_p": {
+    "fms": 10,
+    "steps": 10,
+    "complete": false
+   },
+   "oracle_1c": {
+    "fms": 53,
+    "steps": 53,
+    "complete": false
+   },
+   "oracle_pc": {
+    "fms": 10,
+    "steps": 10,
+    "complete": false
+   }
+  },
+  {
+   "n": 10,
+   "m": 17,
+   "label_steps": 19106,
+   "root_candidates": 18,
+   "root_solvable": 18,
+   "baseline": {
+    "fms": 51,
+    "steps": 51,
+    "complete": false
+   },
+   "oracle_p": {
+    "fms": 10,
+    "steps": 10,
+    "complete": false
+   },
+   "oracle_1c": {
+    "fms": 240,
+    "steps": 240,
+    "complete": false
+   },
+   "oracle_pc": {
+    "fms": 10,
+    "steps": 10,
+    "complete": false
+   }
+  },
+  {
+   "n": 10,
+   "m": 17,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 10,
+   "m": 21,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 10,
+   "m": 15,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 10,
+   "m": 18,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 10,
+   "m": 17,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 10,
+   "m": 17,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 10,
+   "m": 20,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  },
+  {
+   "n": 10,
+   "m": 18,
+   "skipped": "enumeration_over_budget",
+   "label_steps": 5000000
+  }
+ ]
+}
