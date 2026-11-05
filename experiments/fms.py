@@ -120,7 +120,8 @@ def make_hook_factory(args, g) -> HookFactory:
         from train.train_inductive import load_model as load_inductive
 
         model = load_inductive(Path(args.checkpoint), g, args.device)
-        return lambda q, g, cand, order: InductiveReorder(model, q, args.max_depth, args.device)
+        return lambda q, g, cand, order: InductiveReorder(model, q, args.max_depth,
+                                                          args.device, cand=cand)
 
     from models.hook import NeuGNReorder
     from models.pc_hook import PCReorder

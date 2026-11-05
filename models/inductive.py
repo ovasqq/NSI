@@ -101,6 +101,7 @@ class InductiveNeuGN(nn.Module):
         self.qvert_emb = nn.Embedding(NUM_QVERT, d)
         self.pos_emb = nn.Embedding(cfg.max_len + 2, d)
         self.label_emb = nn.Embedding(cfg.num_labels, d) if cfg.token_labels else None
+        self.cand_proj = nn.Linear(1, d)  # log1p(|C(u)|) scalar -> d
         self.anchor = nn.Parameter(torch.randn(d) * 0.02)
         self.no_query = nn.Parameter(torch.zeros(d))
         self.norm_in = nn.LayerNorm(d)
@@ -143,6 +144,9 @@ class InductiveNeuGN(nn.Module):
         tok = self._content_features(content) + self.qvert_emb(batch["qvert"])
         if self.label_emb is not None:
             tok = tok + self.label_emb(batch["tok_label"])
+        if batch.get("cand_count") is not None:
+            c = batch["cand_count"].float().log1p().unsqueeze(-1)
+            tok = tok + self.cand_proj(c)
         x = torch.cat([h_q[:, None], self.anchor.expand(b, 1, -1), tok], dim=1)
         x = x + self.pos_emb(torch.arange(L + 2, device=x.device))[None]
         x = self.norm_in(x)

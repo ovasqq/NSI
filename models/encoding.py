@@ -38,15 +38,19 @@ def gcn_adjacency(q: Graph) -> np.ndarray:
     return a * d[:, None] * d[None, :]
 
 
-def encode_query(q: Graph, seq: list[int]) -> dict:
-    """Parts of the input that do not depend on the mapping."""
+def encode_query(q: Graph, seq: list[int], cand_count: np.ndarray | None = None) -> dict:
+    """Parts of the input that do not depend on the mapping. `cand_count` (if
+    given) is per query vertex |C(u)| — used by the inductive model only."""
     seq_arr = np.asarray(seq, dtype=np.int64)
-    return dict(
+    out = dict(
         seq=seq_arr,
         tok_label=q.labels[seq_arr],
         q_labels=q.labels.copy(),
         q_adj=gcn_adjacency(q),
     )
+    if cand_count is not None:
+        out["cand_count"] = np.asarray(cand_count, dtype=np.float32)
+    return out
 
 
 def encode_state(
@@ -58,11 +62,14 @@ def encode_state(
     m = np.asarray(mapping, dtype=np.int64)
     content = np.where(m[seq] >= 0, m[seq], pad_id(num_g))
     content[seq == target] = cls_id(num_g)
-    return dict(
+    state = dict(
         qenc,
         content=content,
         qvert=(seq + shift) % NUM_QVERT,
     )
+    if "cand_count" in qenc:
+        state["cand_count"] = qenc["cand_count"][seq]  # per token
+    return state
 
 
 def collate(states: list[dict], targets: list[int] | None = None) -> dict[str, torch.Tensor]:
@@ -70,6 +77,7 @@ def collate(states: list[dict], targets: list[int] | None = None) -> dict[str, t
     b = len(states)
     L = max(len(s["content"]) for s in states)
     n = max(len(s["q_labels"]) for s in states)
+    has_cand = all("cand_count" in s for s in states)
     content = torch.zeros(b, L, dtype=torch.long)
     qvert = torch.zeros(b, L, dtype=torch.long)
     tok_label = torch.zeros(b, L, dtype=torch.long)
@@ -77,6 +85,7 @@ def collate(states: list[dict], targets: list[int] | None = None) -> dict[str, t
     q_labels = torch.zeros(b, n, dtype=torch.long)
     q_adj = torch.zeros(b, n, n)
     q_mask = torch.zeros(b, n, dtype=torch.bool)
+    cand_count = torch.zeros(b, L) if has_cand else None
     for i, s in enumerate(states):
         l, k = len(s["content"]), len(s["q_labels"])
         content[i, :l] = torch.from_numpy(s["content"])
@@ -86,8 +95,12 @@ def collate(states: list[dict], targets: list[int] | None = None) -> dict[str, t
         q_labels[i, :k] = torch.from_numpy(s["q_labels"])
         q_adj[i, :k, :k] = torch.from_numpy(s["q_adj"])
         q_mask[i, :k] = True
+        if has_cand:
+            cand_count[i, :l] = torch.from_numpy(s["cand_count"])
     batch = dict(content=content, qvert=qvert, tok_label=tok_label, tok_mask=tok_mask,
                  q_labels=q_labels, q_adj=q_adj, q_mask=q_mask)
+    if has_cand:
+        batch["cand_count"] = cand_count
     if targets is not None:
         batch["target"] = torch.tensor(targets, dtype=torch.long)
     return batch

@@ -20,10 +20,11 @@ from search.graph import Graph
 
 class InductiveReorder:
     def __init__(self, model: InductiveNeuGN, q: Graph, max_depth: int = 3,
-                 device: str | torch.device = "cpu", shift: int = 0):
+                 device: str | torch.device = "cpu", shift: int = 0, cand=None):
         self.model, self.max_depth, self.device, self.shift = model, max_depth, device, shift
         self.num_g = model.num_g
-        self.qenc = encode_query(q, euler_sequence(q))
+        cand_count = [len(c) for c in cand] if cand is not None else None
+        self.qenc = encode_query(q, euler_sequence(q), cand_count)
         self.calls = 0
         self.seconds = 0.0
         with torch.inference_mode():
