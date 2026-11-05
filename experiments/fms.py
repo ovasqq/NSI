@@ -107,7 +107,7 @@ def random_hook(seed: int) -> ReorderHook:
     return hook
 
 
-def make_hook_factory(args) -> HookFactory:
+def make_hook_factory(args, g) -> HookFactory:
     """Returns (q, g, cand, order) -> hook. Hooks are per query: NeuGN
     precomputes h_Q and the Euler sequence, Knuth probes need (C, φ)."""
     if args.method == "baseline":
@@ -115,6 +115,12 @@ def make_hook_factory(args) -> HookFactory:
     if args.method == "random":
         hook = random_hook(args.seed)
         return lambda q, g, cand, order: hook
+    if args.method == "inductive":
+        from models.inductive_hook import InductiveReorder
+        from train.train_inductive import load_model as load_inductive
+
+        model = load_inductive(Path(args.checkpoint), g, args.device)
+        return lambda q, g, cand, order: InductiveReorder(model, q, args.max_depth, args.device)
 
     from models.hook import NeuGNReorder
     from models.pc_hook import PCReorder
@@ -145,8 +151,8 @@ def main() -> None:
     ap.add_argument("--graph", default="hamster")
     ap.add_argument("--size", type=int, default=20)
     ap.add_argument("--density", default="dense")
-    ap.add_argument("--method", default="baseline", choices=["baseline", "random", "neugn", "knuth", "neugn_pc"])
-    ap.add_argument("--checkpoint", default=None, help="model.pt for --method neugn")
+    ap.add_argument("--method", default="baseline", choices=["baseline", "random", "neugn", "knuth", "neugn_pc", "inductive"])
+    ap.add_argument("--checkpoint", default=None, help="model.pt for --method neugn/inductive")
     ap.add_argument("--max-depth", type=int, default=10, help="NeuGN reorders depths < this")
     ap.add_argument("--device", default="cpu", help="inference device for NeuGN")
     ap.add_argument("--pc-depth", type=int, default=3, help="p/c scoring at depths < this")
@@ -167,7 +173,7 @@ def main() -> None:
     qpath = Path(args.query_set) if args.query_set else query_set_path(args.graph, args.size, args.density)
     queries, qmeta = load_query_set(qpath)
     queries = queries[: args.limit]
-    factory = make_hook_factory(args)
+    factory = make_hook_factory(args, g)
 
     records = []
     for i, q in enumerate(queries):
