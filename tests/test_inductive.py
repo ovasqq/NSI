@@ -75,7 +75,7 @@ def test_learning(g):
         s = model(batch)
         scores = model.score(s, batch["cand"])
         m = batch["cand_mask"]
-        return F.binary_cross_entropy_with_logits(scores[m], batch["label"][m])
+        return F.mse_loss(scores[m], batch["target"][m])
 
     first = loss_fn().item()
     opt = torch.optim.Adam(model.parameters(), lr=1e-2)

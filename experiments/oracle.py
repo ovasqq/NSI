@@ -80,7 +80,7 @@ def run_one_query(q: Graph, g: Graph, model, args) -> dict:
         return dict(n=q.n, m=q.m, skipped="enumeration_over_budget", label_steps=label_steps)
 
     root = labels[()]
-    n_solvable_root = sum(1 for _, sol, _ in root)
+    n_solvable_root = sum(1 for _, sol, _, _ in root)
     row: dict = dict(
         n=q.n, m=q.m, label_steps=label_steps,
         root_candidates=len(root), root_solvable=n_solvable_root,

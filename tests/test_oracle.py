@@ -44,11 +44,12 @@ def test_labels_match_ground_truth(g):
         root = labels[()]
         assert len(root) == len(space.local_candidates(0, [-1] * q.n, set()))
         u0 = order[0]
-        for v, sol, size in root:
+        for v, sol, size, matches in root:
             restricted = [np.array([v]) if u == u0 else c for u, c in enumerate(cand)]
             res = enumerate_matches(q, g, restricted, order)
             assert sol == (res.num_matches > 0)
             assert size == res.steps
+            assert matches == res.num_matches
 
 
 def test_labels_steps_equal_full_enumeration(g):
@@ -80,7 +81,7 @@ def test_modes_sort_by_documented_keys(g):
         root = space.local_candidates(0, [-1] * q.n, set())
         if len(root) < 2:
             continue
-        info = {v: (sol, size) for v, sol, size in labels[()]}
+        info = {v: (sol, size) for v, sol, size, _ in labels[()]}
 
         # 'p': all solvable before all dead ends.
         p_order = OracleReorder(space, labels, "p", max_depth=1)(0, order[0], [-1] * q.n, root)

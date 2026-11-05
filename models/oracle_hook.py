@@ -30,7 +30,7 @@ class OracleReorder:
         info = self.labels.get(key)
         if info is None:  # unlabeled (only possible if labels were pruned)
             return cands
-        lookup = {v: (sol, size) for v, sol, size in info}
+        lookup = {v: (sol, size) for v, sol, size, _ in info}
         self.calls += 1
 
         def keyfn(v: int) -> tuple:

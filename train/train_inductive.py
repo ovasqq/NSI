@@ -62,7 +62,7 @@ def load_model(path: Path, g, device="cpu") -> InductiveNeuGN:
 
 def make_examples(g, rng: np.random.Generator, min_size, max_size,
                   label_depth, budget) -> list[tuple[dict, list[tuple[int, int]]]]:
-    """One random-walk query -> list of (encoded state, [(candidate, has_solution)])."""
+    """One random-walk query -> list of (encoded state, [(candidate, num_matches)])."""
     size = int(rng.integers(min_size, max_size + 1))
     start = int(rng.integers(g.n))
     walk = random_walk_vertices(g, start, size, rng)
@@ -76,7 +76,8 @@ def make_examples(g, rng: np.random.Generator, min_size, max_size,
     labels, _, complete = label_subtrees(SearchSpace(q, g, cand, order), label_depth, budget)
     if not complete:
         return []
-    qenc = encode_query(q, euler_sequence(q))
+    cand_count = [len(c) for c in cand]
+    qenc = encode_query(q, euler_sequence(q), cand_count)
     out: list[tuple[dict, list[tuple[int, int]]]] = []
     for key, cand_list in labels.items():
         i = len(key)
@@ -84,12 +85,12 @@ def make_examples(g, rng: np.random.Generator, min_size, max_size,
         for j in range(i):
             mapping[order[j]] = key[j]
         state = encode_state(qenc, mapping, order[i], 0, g.n)
-        out.append((state, [(v, int(sol)) for v, sol, _ in cand_list]))
+        out.append((state, [(v, int(matches)) for v, _, _, matches in cand_list]))
     return out
 
 
 class InductiveStream(IterableDataset):
-    """Endless stream of (state, [(candidate, has_solution)]) examples."""
+    """Endless stream of (state, [(candidate, num_matches)]) examples."""
 
     def __init__(self, g, seed: int, min_size=5, max_size=15,
                  label_depth=3, budget=5_000_000):
@@ -112,14 +113,14 @@ def collate_inductive(items: list[tuple[dict, list[tuple[int, int]]]]):
     b = len(items)
     K = max(len(cs) for _, cs in items)
     cand = torch.zeros(b, K, dtype=torch.long)
-    labels = torch.zeros(b, K)
+    target = torch.zeros(b, K)  # log(1 + num_matches) regression target
     mask = torch.zeros(b, K, dtype=torch.bool)
     for i, (_, cs) in enumerate(items):
-        for j, (v, lab) in enumerate(cs):
+        for j, (v, matches) in enumerate(cs):
             cand[i, j] = v
-            labels[i, j] = float(lab)
+            target[i, j] = float(np.log1p(matches))
             mask[i, j] = True
-    batch["cand"], batch["cand_mask"], batch["label"] = cand, mask, labels
+    batch["cand"], batch["cand_mask"], batch["target"] = cand, mask, target
     return batch
 
 
@@ -147,8 +148,6 @@ def main() -> None:
     ap.add_argument("--max-size", type=int, default=15)
     ap.add_argument("--label-depth", type=int, default=3)
     ap.add_argument("--budget", type=int, default=5_000_000)
-    ap.add_argument("--pos-weight", type=float, default=-1.0,
-                    help="BCE pos_weight; -1 = dynamic per batch (re-balance classes)")
     ap.add_argument("--device", default="auto")
     ap.add_argument("--workers", type=int, default=8)
     ap.add_argument("--seed", type=int, default=0)
@@ -191,19 +190,14 @@ def main() -> None:
                 s = model(batch)
                 scores = model.score(s, batch["cand"])
                 m = batch["cand_mask"]
-                labels = batch["label"][m]
-                if args.pos_weight < 0:
-                    pr = labels.mean().clamp(min=1e-4, max=1 - 1e-4)
-                    pw = ((1 - pr) / pr).clamp(min=0.02, max=50.0)
-                else:
-                    pw = torch.tensor(args.pos_weight, device=device)
-                loss = F.binary_cross_entropy_with_logits(scores[m], labels, pos_weight=pw)
+                target = batch["target"][m]  # log(1 + num_matches)
+                loss = F.mse_loss(scores[m], target)
                 opt.zero_grad(set_to_none=True)
                 loss.backward()
                 opt.step()
                 tot_loss += loss.item() * int(m.sum())
                 tot += int(m.sum())
-                tot_pos += int(labels.sum())
+                tot_pos += int((target > 0).sum())  # solvable candidates
             sched.step()
             rec = dict(epoch=epoch, loss=tot_loss / max(tot, 1), pos_rate=tot_pos / max(tot, 1),
                        lr=sched.get_last_lr()[0], seconds=time.time() - t0)
