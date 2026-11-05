@@ -1,12 +1,15 @@
 """CLI: train the inductive candidate scorer on one data graph.
 
     python -m train.train_inductive --graph hamster --run inductive
+    python -m train.train_inductive --graph hamster --run inductive \
+        --data-file data/queries/hamster/train_labeled_0.json
 
 Training data: random-walk queries (5–15 vertices) whose search tree is fully
 enumerated (`search.oracle.label_subtrees`); for every state at depth <
-label_depth and every local candidate the label is has_solution (0/1). Loss is
-BCE on the bilinear per-candidate logit. The model has no parameters tied to G,
-so the checkpoint can be applied to another graph with the same label set.
+label_depth and every local candidate the label is num_matches (cardinality).
+Loss is MSE on log(1 + num_matches) (NeuSO-style regression). The model has no
+parameters tied to G, so the checkpoint can be applied to another graph with
+the same label set.
 """
 
 from __future__ import annotations
@@ -28,8 +31,10 @@ from queries.euler import euler_sequence
 from queries.random_walk import random_walk_vertices
 from search.enumerate import SearchSpace
 from search.filter import nlf_filter
+from search.graph import Graph
 from search.oracle import label_subtrees
 from search.order import gql_order
+from train.training_data import load_labeled_set
 
 CKPT_DIR = Path(__file__).resolve().parent.parent / "checkpoints"
 
@@ -108,6 +113,36 @@ class InductiveStream(IterableDataset):
                 yield ex
 
 
+class LabeledDataset(IterableDataset):
+    """Yields (encoded state, [(candidate, num_matches)]) from a saved labeled
+    set (see train/training_data.py). No enumeration at train time."""
+
+    def __init__(self, path, num_g: int):
+        self.data = load_labeled_set(path)
+        self.num_g = num_g
+        self.queries = self.data["queries"]
+
+    def __iter__(self):
+        epoch = 0
+        while True:
+            rng = np.random.default_rng(epoch)
+            for i in rng.permutation(len(self.queries)).tolist():
+                qd = self.queries[i]
+                q = Graph.from_edges(len(qd["labels"]), qd["edges"], qd["labels"])
+                cand_count = np.asarray(qd["cand_count"], dtype=np.float32)
+                qenc = encode_query(q, euler_sequence(q), cand_count)
+                order = qd["order"]
+                for st in qd["states"]:
+                    mapping = [-1] * q.n
+                    for j, img in enumerate(st["key"]):
+                        mapping[order[j]] = img
+                    state = encode_state(qenc, mapping, st["target"], 0, self.num_g)
+                    cands = [(v, m) for v, m in st["candidates"]]
+                    if cands:
+                        yield state, cands
+            epoch += 1
+
+
 def collate_inductive(items: list[tuple[dict, list[tuple[int, int]]]]):
     batch = collate([s for s, _ in items])
     b = len(items)
@@ -148,6 +183,8 @@ def main() -> None:
     ap.add_argument("--max-size", type=int, default=15)
     ap.add_argument("--label-depth", type=int, default=3)
     ap.add_argument("--budget", type=int, default=5_000_000)
+    ap.add_argument("--data-file", default=None,
+                    help="labeled set JSON (train on saved data instead of on-the-fly)")
     ap.add_argument("--device", default="auto")
     ap.add_argument("--workers", type=int, default=8)
     ap.add_argument("--seed", type=int, default=0)
@@ -172,10 +209,15 @@ def main() -> None:
     run_dir.mkdir(parents=True, exist_ok=True)
     (run_dir / "config.json").write_text(json.dumps(dict(model=cfg.to_dict(), args=vars(args)), indent=1))
 
-    stream = InductiveStream(g, args.seed, args.min_size, args.max_size,
-                             args.label_depth, args.budget)
+    if args.data_file:
+        stream = LabeledDataset(args.data_file, g.n)
+        workers = 0
+    else:
+        stream = InductiveStream(g, args.seed, args.min_size, args.max_size,
+                                 args.label_depth, args.budget)
+        workers = args.workers
     loader = DataLoader(stream, batch_size=args.batch, collate_fn=collate_inductive,
-                        num_workers=args.workers, persistent_workers=args.workers > 0)
+                        num_workers=workers, persistent_workers=workers > 0)
     batches = iter(loader)
     print(f"{args.graph}: {g.n} vertices, {num_labels} labels, "
           f"{sum(p.numel() for p in model.parameters()):,} params, {device}")
