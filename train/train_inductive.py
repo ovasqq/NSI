@@ -19,7 +19,7 @@ from pathlib import Path
 import numpy as np
 import torch
 import torch.nn.functional as F
-from torch.utils.data import DataLoader, IterableDataset
+from torch.utils.data import DataLoader, IterableDataset, get_worker_info
 
 from data.loaders import load
 from models.encoding import collate, encode_query, encode_state
@@ -98,7 +98,9 @@ class InductiveStream(IterableDataset):
         self.label_depth, self.budget = label_depth, budget
 
     def __iter__(self):
-        rng = np.random.default_rng(self.seed)
+        info = get_worker_info()
+        wid = info.id if info else 0
+        rng = np.random.default_rng([self.seed, wid])
         while True:
             for ex in make_examples(self.g, rng, self.min_size, self.max_size,
                                     self.label_depth, self.budget):
@@ -145,7 +147,10 @@ def main() -> None:
     ap.add_argument("--max-size", type=int, default=15)
     ap.add_argument("--label-depth", type=int, default=3)
     ap.add_argument("--budget", type=int, default=5_000_000)
+    ap.add_argument("--pos-weight", type=float, default=-1.0,
+                    help="BCE pos_weight; -1 = dynamic per batch (re-balance classes)")
     ap.add_argument("--device", default="auto")
+    ap.add_argument("--workers", type=int, default=8)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--save-every", type=int, default=2)
     args = ap.parse_args()
@@ -170,7 +175,8 @@ def main() -> None:
 
     stream = InductiveStream(g, args.seed, args.min_size, args.max_size,
                              args.label_depth, args.budget)
-    loader = DataLoader(stream, batch_size=args.batch, collate_fn=collate_inductive)
+    loader = DataLoader(stream, batch_size=args.batch, collate_fn=collate_inductive,
+                        num_workers=args.workers, persistent_workers=args.workers > 0)
     batches = iter(loader)
     print(f"{args.graph}: {g.n} vertices, {num_labels} labels, "
           f"{sum(p.numel() for p in model.parameters()):,} params, {device}")
@@ -185,13 +191,19 @@ def main() -> None:
                 s = model(batch)
                 scores = model.score(s, batch["cand"])
                 m = batch["cand_mask"]
-                loss = F.binary_cross_entropy_with_logits(scores[m], batch["label"][m])
+                labels = batch["label"][m]
+                if args.pos_weight < 0:
+                    pr = labels.mean().clamp(min=1e-4, max=1 - 1e-4)
+                    pw = ((1 - pr) / pr).clamp(min=0.02, max=50.0)
+                else:
+                    pw = torch.tensor(args.pos_weight, device=device)
+                loss = F.binary_cross_entropy_with_logits(scores[m], labels, pos_weight=pw)
                 opt.zero_grad(set_to_none=True)
                 loss.backward()
                 opt.step()
                 tot_loss += loss.item() * int(m.sum())
                 tot += int(m.sum())
-                tot_pos += int(batch["label"][m].sum())
+                tot_pos += int(labels.sum())
             sched.step()
             rec = dict(epoch=epoch, loss=tot_loss / max(tot, 1), pos_rate=tot_pos / max(tot, 1),
                        lr=sched.get_last_lr()[0], seconds=time.time() - t0)
