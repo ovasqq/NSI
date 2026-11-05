@@ -42,6 +42,7 @@ data/loaders.py ─► train/dataset.py (блуждание → Q → эйлер
 | [GLOSSARY.md](GLOSSARY.md) | Терминология: задача, алгоритм, метрики (FMS и др.), NeuGN, обучение |
 | [PROGRESS_1.md](PROGRESS_1.md), [PROGRESS_2.md](PROGRESS_2.md), [PROGRESS_3.md](PROGRESS_3.md) | Отчёты о ходе работ по этапам |
 | [ORACLE_EXPERIMENT.md](ORACLE_EXPERIMENT.md) | Оракульный эксперимент (этап 4, go/no-go): истинные p/c, что и как сделано, результаты и вердикт |
+| [PHI_EXPERIMENT.md](PHI_EXPERIMENT.md) | Замер порядка φ (этап 4b): есть ли запас в выборе порядка вершин (GQL/RI/случайный) |
 | [PRESENTATION_BRIEF_1.md](PRESENTATION_BRIEF_1.md) | Итог для презентации: воспроизведение NeuGN |
 | [PRESENTATION_BRIEF_2.md](PRESENTATION_BRIEF_2.md) | Итог для презентации: ранжирование по p/c без дообучения (отрицательный результат) |
 | [pyproject.toml](pyproject.toml) | Зависимости и настройки pytest (`pythonpath = ["."]`, поэтому импорты вида `from search.graph import Graph`) |
@@ -58,4 +59,5 @@ data/loaders.py ─► train/dataset.py (блуждание → Q → эйлер
     --method neugn --checkpoint checkpoints/hamster/paper/model.pt
 .venv/bin/python -m experiments.oracle --graph hamster --sizes 8 10 --densities dense sparse \
     --count 100 --checkpoint checkpoints/hamster/paper/model.pt   # оракул (этап 4)
+.venv/bin/python -m experiments.phi --graph hamster --sizes 8 10 --densities dense sparse   # замер φ
 ```

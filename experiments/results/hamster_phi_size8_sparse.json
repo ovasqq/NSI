@@ -1,0 +1,1485 @@
+{
+ "config": {
+  "graph": "hamster",
+  "sizes": [
+   8
+  ],
+  "densities": [
+   "sparse"
+  ],
+  "random_orders": 3,
+  "seed": 0,
+  "enum_budget": 3000000,
+  "search_budget": 1000000,
+  "limit": null,
+  "tag": null
+ },
+ "summary": {
+  "queries": 100,
+  "gql_complete": 24,
+  "median_total_gql": 55434.0,
+  "median_total_ri": 58837.0,
+  "median_total_rand_best": 609832.5,
+  "ri_vs_gql": {
+   "better": 6,
+   "worse": 16,
+   "tied": 0,
+   "n": 22,
+   "geomean": 1.1080189308826542
+  },
+  "rand_best_vs_gql": {
+   "better": 2,
+   "of": 24,
+   "geomean": 4.767738188289701
+  },
+  "median_fms_gql": 8.0,
+  "median_fms_ri": 8.0,
+  "median_fms_rand": 540.5
+ },
+ "records": [
+  {
+   "query": 0,
+   "n": 8,
+   "m": 8,
+   "gql_total": null,
+   "gql_fms": 25,
+   "ri_fms": 8,
+   "rand_fms": [
+    12,
+    30,
+    34
+   ]
+  },
+  {
+   "query": 1,
+   "n": 8,
+   "m": 9,
+   "gql_total": null,
+   "gql_fms": 8,
+   "ri_fms": 8,
+   "rand_fms": [
+    8,
+    24,
+    44
+   ]
+  },
+  {
+   "query": 2,
+   "n": 8,
+   "m": 7,
+   "gql_total": null,
+   "gql_fms": 9,
+   "ri_fms": 9,
+   "rand_fms": [
+    436,
+    null,
+    165307
+   ]
+  },
+  {
+   "query": 3,
+   "n": 8,
+   "m": 9,
+   "gql_total": null,
+   "gql_fms": 18,
+   "ri_fms": 8,
+   "rand_fms": [
+    86465,
+    null,
+    898
+   ]
+  },
+  {
+   "query": 4,
+   "n": 8,
+   "m": 10,
+   "gql_total": 161679,
+   "gql_fms": 16,
+   "ri_fms": 1364,
+   "rand_fms": [
+    1106,
+    354,
+    16832
+   ],
+   "ri_total": 243308,
+   "rand_total": [
+    1100145,
+    1084846,
+    2174806
+   ]
+  },
+  {
+   "query": 5,
+   "n": 8,
+   "m": 10,
+   "gql_total": null,
+   "gql_fms": 18,
+   "ri_fms": 15,
+   "rand_fms": [
+    36,
+    8,
+    8
+   ]
+  },
+  {
+   "query": 6,
+   "n": 8,
+   "m": 11,
+   "gql_total": null,
+   "gql_fms": 9,
+   "ri_fms": 8,
+   "rand_fms": [
+    20,
+    728756,
+    12
+   ]
+  },
+  {
+   "query": 7,
+   "n": 8,
+   "m": 11,
+   "gql_total": null,
+   "gql_fms": 272,
+   "ri_fms": 8,
+   "rand_fms": [
+    null,
+    543,
+    646121
+   ]
+  },
+  {
+   "query": 8,
+   "n": 8,
+   "m": 9,
+   "gql_total": null,
+   "gql_fms": 8,
+   "ri_fms": 8,
+   "rand_fms": [
+    19,
+    8,
+    8
+   ]
+  },
+  {
+   "query": 9,
+   "n": 8,
+   "m": 11,
+   "gql_total": null,
+   "gql_fms": 8,
+   "ri_fms": 9,
+   "rand_fms": [
+    2051,
+    8,
+    5722
+   ]
+  },
+  {
+   "query": 10,
+   "n": 8,
+   "m": 8,
+   "gql_total": 18610,
+   "gql_fms": 9,
+   "ri_fms": 33,
+   "rand_fms": [
+    17,
+    7156,
+    201999
+   ],
+   "ri_total": 20884,
+   "rand_total": [
+    18486,
+    68498,
+    948944
+   ]
+  },
+  {
+   "query": 11,
+   "n": 8,
+   "m": 10,
+   "gql_total": null,
+   "gql_fms": 8,
+   "ri_fms": 8,
+   "rand_fms": [
+    18,
+    8,
+    8
+   ]
+  },
+  {
+   "query": 12,
+   "n": 8,
+   "m": 10,
+   "gql_total": 2367799,
+   "gql_fms": 8,
+   "ri_fms": 37,
+   "rand_fms": [
+    31,
+    8,
+    29
+   ],
+   "ri_total": null,
+   "rand_total": [
+    null,
+    null,
+    null
+   ]
+  },
+  {
+   "query": 13,
+   "n": 8,
+   "m": 9,
+   "gql_total": 67949,
+   "gql_fms": 11,
+   "ri_fms": 80,
+   "rand_fms": [
+    null,
+    11678,
+    22931
+   ],
+   "ri_total": 84815,
+   "rand_total": [
+    null,
+    1148640,
+    642201
+   ]
+  },
+  {
+   "query": 14,
+   "n": 8,
+   "m": 9,
+   "gql_total": null,
+   "gql_fms": 10,
+   "ri_fms": 14,
+   "rand_fms": [
+    10,
+    null,
+    null
+   ]
+  },
+  {
+   "query": 15,
+   "n": 8,
+   "m": 11,
+   "gql_total": null,
+   "gql_fms": 8,
+   "ri_fms": 8,
+   "rand_fms": [
+    12,
+    366601,
+    64684
+   ]
+  },
+  {
+   "query": 16,
+   "n": 8,
+   "m": 11,
+   "gql_total": null,
+   "gql_fms": 8,
+   "ri_fms": 14,
+   "rand_fms": [
+    16511,
+    81055,
+    505
+   ]
+  },
+  {
+   "query": 17,
+   "n": 8,
+   "m": 8,
+   "gql_total": null,
+   "gql_fms": 12,
+   "ri_fms": 12,
+   "rand_fms": [
+    97,
+    49856,
+    6963
+   ]
+  },
+  {
+   "query": 18,
+   "n": 8,
+   "m": 10,
+   "gql_total": 16154,
+   "gql_fms": 8,
+   "ri_fms": 8,
+   "rand_fms": [
+    176502,
+    8,
+    1227
+   ],
+   "ri_total": 15757,
+   "rand_total": [
+    1186453,
+    454251,
+    null
+   ]
+  },
+  {
+   "query": 19,
+   "n": 8,
+   "m": 10,
+   "gql_total": null,
+   "gql_fms": 192,
+   "ri_fms": 9,
+   "rand_fms": [
+    1168,
+    8,
+    420
+   ]
+  },
+  {
+   "query": 20,
+   "n": 8,
+   "m": 8,
+   "gql_total": null,
+   "gql_fms": 8,
+   "ri_fms": 8,
+   "rand_fms": [
+    2215,
+    3412,
+    8
+   ]
+  },
+  {
+   "query": 21,
+   "n": 8,
+   "m": 11,
+   "gql_total": null,
+   "gql_fms": 43,
+   "ri_fms": 55,
+   "rand_fms": [
+    17858,
+    147,
+    49223
+   ]
+  },
+  {
+   "query": 22,
+   "n": 8,
+   "m": 9,
+   "gql_total": null,
+   "gql_fms": 8,
+   "ri_fms": 9,
+   "rand_fms": [
+    399452,
+    38638,
+    73572
+   ]
+  },
+  {
+   "query": 23,
+   "n": 8,
+   "m": 9,
+   "gql_total": null,
+   "gql_fms": 8,
+   "ri_fms": 8,
+   "rand_fms": [
+    8,
+    224,
+    8
+   ]
+  },
+  {
+   "query": 24,
+   "n": 8,
+   "m": 9,
+   "gql_total": null,
+   "gql_fms": 8,
+   "ri_fms": 9,
+   "rand_fms": [
+    51,
+    null,
+    5644
+   ]
+  },
+  {
+   "query": 25,
+   "n": 8,
+   "m": 10,
+   "gql_total": null,
+   "gql_fms": 11,
+   "ri_fms": 49,
+   "rand_fms": [
+    109206,
+    1264,
+    95489
+   ]
+  },
+  {
+   "query": 26,
+   "n": 8,
+   "m": 8,
+   "gql_total": null,
+   "gql_fms": 13,
+   "ri_fms": 39,
+   "rand_fms": [
+    null,
+    588682,
+    8
+   ]
+  },
+  {
+   "query": 27,
+   "n": 8,
+   "m": 9,
+   "gql_total": null,
+   "gql_fms": 8,
+   "ri_fms": 8,
+   "rand_fms": [
+    8,
+    21233,
+    27
+   ]
+  },
+  {
+   "query": 28,
+   "n": 8,
+   "m": 11,
+   "gql_total": 2091343,
+   "gql_fms": 17,
+   "ri_fms": 8,
+   "rand_fms": [
+    287927,
+    27,
+    568
+   ],
+   "ri_total": 2892524,
+   "rand_total": [
+    null,
+    null,
+    null
+   ]
+  },
+  {
+   "query": 29,
+   "n": 8,
+   "m": 8,
+   "gql_total": null,
+   "gql_fms": 8,
+   "ri_fms": 8,
+   "rand_fms": [
+    194,
+    null,
+    56
+   ]
+  },
+  {
+   "query": 30,
+   "n": 8,
+   "m": 7,
+   "gql_total": null,
+   "gql_fms": 8,
+   "ri_fms": 8,
+   "rand_fms": [
+    8,
+    43,
+    8
+   ]
+  },
+  {
+   "query": 31,
+   "n": 8,
+   "m": 9,
+   "gql_total": null,
+   "gql_fms": 8,
+   "ri_fms": 8,
+   "rand_fms": [
+    8,
+    10,
+    9
+   ]
+  },
+  {
+   "query": 32,
+   "n": 8,
+   "m": 7,
+   "gql_total": 652150,
+   "gql_fms": 10,
+   "ri_fms": 10,
+   "rand_fms": [
+    1239,
+    34,
+    237
+   ],
+   "ri_total": 693387,
+   "rand_total": [
+    null,
+    null,
+    1586917
+   ]
+  },
+  {
+   "query": 33,
+   "n": 8,
+   "m": 9,
+   "gql_total": null,
+   "gql_fms": 8,
+   "ri_fms": 8,
+   "rand_fms": [
+    690,
+    180520,
+    409
+   ]
+  },
+  {
+   "query": 34,
+   "n": 8,
+   "m": 9,
+   "gql_total": 13,
+   "gql_fms": 8,
+   "ri_fms": 8,
+   "rand_fms": [
+    9877,
+    25305,
+    14339
+   ],
+   "ri_total": 14,
+   "rand_total": [
+    10021,
+    25543,
+    15690
+   ]
+  },
+  {
+   "query": 35,
+   "n": 8,
+   "m": 8,
+   "gql_total": null,
+   "gql_fms": 8,
+   "ri_fms": 8,
+   "rand_fms": [
+    12,
+    9229,
+    21
+   ]
+  },
+  {
+   "query": 36,
+   "n": 8,
+   "m": 11,
+   "gql_total": null,
+   "gql_fms": 93,
+   "ri_fms": 110,
+   "rand_fms": [
+    18525,
+    5287,
+    8
+   ]
+  },
+  {
+   "query": 37,
+   "n": 8,
+   "m": 8,
+   "gql_total": null,
+   "gql_fms": 8,
+   "ri_fms": 8,
+   "rand_fms": [
+    8,
+    201691,
+    10895
+   ]
+  },
+  {
+   "query": 38,
+   "n": 8,
+   "m": 9,
+   "gql_total": null,
+   "gql_fms": 8,
+   "ri_fms": 8,
+   "rand_fms": [
+    5936,
+    8,
+    10
+   ]
+  },
+  {
+   "query": 39,
+   "n": 8,
+   "m": 8,
+   "gql_total": null,
+   "gql_fms": 8,
+   "ri_fms": 8,
+   "rand_fms": [
+    8,
+    25,
+    93085
+   ]
+  },
+  {
+   "query": 40,
+   "n": 8,
+   "m": 11,
+   "gql_total": 2143,
+   "gql_fms": 8,
+   "ri_fms": 8,
+   "rand_fms": [
+    253,
+    1247,
+    35
+   ],
+   "ri_total": 1965,
+   "rand_total": [
+    8682,
+    36244,
+    4006
+   ]
+  },
+  {
+   "query": 41,
+   "n": 8,
+   "m": 10,
+   "gql_total": null,
+   "gql_fms": 10,
+   "ri_fms": 15,
+   "rand_fms": [
+    8,
+    143271,
+    86111
+   ]
+  },
+  {
+   "query": 42,
+   "n": 8,
+   "m": 9,
+   "gql_total": null,
+   "gql_fms": 8,
+   "ri_fms": 21,
+   "rand_fms": [
+    8436,
+    334,
+    996
+   ]
+  },
+  {
+   "query": 43,
+   "n": 8,
+   "m": 11,
+   "gql_total": 18135,
+   "gql_fms": 506,
+   "ri_fms": 746,
+   "rand_fms": [
+    23045,
+    5756,
+    8880
+   ],
+   "ri_total": 19739,
+   "rand_total": [
+    null,
+    374103,
+    null
+   ]
+  },
+  {
+   "query": 44,
+   "n": 8,
+   "m": 9,
+   "gql_total": null,
+   "gql_fms": 8,
+   "ri_fms": 8,
+   "rand_fms": [
+    8,
+    44,
+    16
+   ]
+  },
+  {
+   "query": 45,
+   "n": 8,
+   "m": 8,
+   "gql_total": null,
+   "gql_fms": 8,
+   "ri_fms": 8,
+   "rand_fms": [
+    8,
+    8418,
+    8488
+   ]
+  },
+  {
+   "query": 46,
+   "n": 8,
+   "m": 8,
+   "gql_total": null,
+   "gql_fms": 8,
+   "ri_fms": 8,
+   "rand_fms": [
+    5555,
+    937,
+    null
+   ]
+  },
+  {
+   "query": 47,
+   "n": 8,
+   "m": 11,
+   "gql_total": null,
+   "gql_fms": 10,
+   "ri_fms": 9,
+   "rand_fms": [
+    202195,
+    231,
+    null
+   ]
+  },
+  {
+   "query": 48,
+   "n": 8,
+   "m": 8,
+   "gql_total": null,
+   "gql_fms": 12,
+   "ri_fms": 9,
+   "rand_fms": [
+    237,
+    817753,
+    228
+   ]
+  },
+  {
+   "query": 49,
+   "n": 8,
+   "m": 11,
+   "gql_total": null,
+   "gql_fms": 8,
+   "ri_fms": 8,
+   "rand_fms": [
+    12,
+    12,
+    8
+   ]
+  },
+  {
+   "query": 50,
+   "n": 8,
+   "m": 10,
+   "gql_total": null,
+   "gql_fms": 8,
+   "ri_fms": 8,
+   "rand_fms": [
+    17,
+    8,
+    8
+   ]
+  },
+  {
+   "query": 51,
+   "n": 8,
+   "m": 9,
+   "gql_total": null,
+   "gql_fms": 22,
+   "ri_fms": 13,
+   "rand_fms": [
+    10,
+    43,
+    12
+   ]
+  },
+  {
+   "query": 52,
+   "n": 8,
+   "m": 9,
+   "gql_total": null,
+   "gql_fms": 10,
+   "ri_fms": 8,
+   "rand_fms": [
+    8,
+    8,
+    null
+   ]
+  },
+  {
+   "query": 53,
+   "n": 8,
+   "m": 10,
+   "gql_total": null,
+   "gql_fms": 8,
+   "ri_fms": 8,
+   "rand_fms": [
+    8,
+    57660,
+    8
+   ]
+  },
+  {
+   "query": 54,
+   "n": 8,
+   "m": 10,
+   "gql_total": null,
+   "gql_fms": 38,
+   "ri_fms": 8,
+   "rand_fms": [
+    19,
+    316,
+    8
+   ]
+  },
+  {
+   "query": 55,
+   "n": 8,
+   "m": 11,
+   "gql_total": null,
+   "gql_fms": 8,
+   "ri_fms": 8,
+   "rand_fms": [
+    25173,
+    14,
+    123132
+   ]
+  },
+  {
+   "query": 56,
+   "n": 8,
+   "m": 10,
+   "gql_total": null,
+   "gql_fms": 8,
+   "ri_fms": 8,
+   "rand_fms": [
+    39,
+    28,
+    68
+   ]
+  },
+  {
+   "query": 57,
+   "n": 8,
+   "m": 10,
+   "gql_total": null,
+   "gql_fms": 10,
+   "ri_fms": 8,
+   "rand_fms": [
+    1134,
+    200464,
+    57873
+   ]
+  },
+  {
+   "query": 58,
+   "n": 8,
+   "m": 9,
+   "gql_total": null,
+   "gql_fms": 20,
+   "ri_fms": 14,
+   "rand_fms": [
+    83,
+    4556,
+    2088
+   ]
+  },
+  {
+   "query": 59,
+   "n": 8,
+   "m": 7,
+   "gql_total": null,
+   "gql_fms": 8,
+   "ri_fms": 8,
+   "rand_fms": [
+    9,
+    6335,
+    8
+   ]
+  },
+  {
+   "query": 60,
+   "n": 8,
+   "m": 10,
+   "gql_total": 1597,
+   "gql_fms": 11,
+   "ri_fms": 29,
+   "rand_fms": [
+    298,
+    214231,
+    655
+   ],
+   "ri_total": 1602,
+   "rand_total": [
+    142819,
+    1232949,
+    5061
+   ]
+  },
+  {
+   "query": 61,
+   "n": 8,
+   "m": 8,
+   "gql_total": null,
+   "gql_fms": 8,
+   "ri_fms": 8,
+   "rand_fms": [
+    8,
+    1366,
+    8
+   ]
+  },
+  {
+   "query": 62,
+   "n": 8,
+   "m": 8,
+   "gql_total": null,
+   "gql_fms": 8,
+   "ri_fms": 8,
+   "rand_fms": [
+    24564,
+    284703,
+    8
+   ]
+  },
+  {
+   "query": 63,
+   "n": 8,
+   "m": 8,
+   "gql_total": null,
+   "gql_fms": 8,
+   "ri_fms": 8,
+   "rand_fms": [
+    13,
+    17,
+    8
+   ]
+  },
+  {
+   "query": 64,
+   "n": 8,
+   "m": 9,
+   "gql_total": null,
+   "gql_fms": 8,
+   "ri_fms": 8,
+   "rand_fms": [
+    9,
+    8,
+    72
+   ]
+  },
+  {
+   "query": 65,
+   "n": 8,
+   "m": 8,
+   "gql_total": null,
+   "gql_fms": 8,
+   "ri_fms": 9,
+   "rand_fms": [
+    11,
+    9,
+    null
+   ]
+  },
+  {
+   "query": 66,
+   "n": 8,
+   "m": 10,
+   "gql_total": 94,
+   "gql_fms": 22,
+   "ri_fms": 16,
+   "rand_fms": [
+    207,
+    847,
+    299
+   ],
+   "ri_total": 114,
+   "rand_total": [
+    2442,
+    13417,
+    699
+   ]
+  },
+  {
+   "query": 67,
+   "n": 8,
+   "m": 11,
+   "gql_total": 1627900,
+   "gql_fms": 8,
+   "ri_fms": 8,
+   "rand_fms": [
+    8,
+    44,
+    24
+   ],
+   "ri_total": 1823775,
+   "rand_total": [
+    1769583,
+    null,
+    null
+   ]
+  },
+  {
+   "query": 68,
+   "n": 8,
+   "m": 9,
+   "gql_total": 698,
+   "gql_fms": 12,
+   "ri_fms": 9,
+   "rand_fms": [
+    12,
+    423,
+    8
+   ],
+   "ri_total": 1081,
+   "rand_total": [
+    677,
+    1226,
+    1148
+   ]
+  },
+  {
+   "query": 69,
+   "n": 8,
+   "m": 9,
+   "gql_total": null,
+   "gql_fms": 8,
+   "ri_fms": 8,
+   "rand_fms": [
+    null,
+    8,
+    644747
+   ]
+  },
+  {
+   "query": 70,
+   "n": 8,
+   "m": 10,
+   "gql_total": null,
+   "gql_fms": 113,
+   "ri_fms": 49,
+   "rand_fms": [
+    null,
+    8,
+    8
+   ]
+  },
+  {
+   "query": 71,
+   "n": 8,
+   "m": 8,
+   "gql_total": null,
+   "gql_fms": 24,
+   "ri_fms": 8,
+   "rand_fms": [
+    5648,
+    253,
+    8
+   ]
+  },
+  {
+   "query": 72,
+   "n": 8,
+   "m": 7,
+   "gql_total": null,
+   "gql_fms": 8,
+   "ri_fms": 8,
+   "rand_fms": [
+    1330,
+    1918,
+    10
+   ]
+  },
+  {
+   "query": 73,
+   "n": 8,
+   "m": 10,
+   "gql_total": null,
+   "gql_fms": 9,
+   "ri_fms": 8,
+   "rand_fms": [
+    9,
+    16747,
+    8
+   ]
+  },
+  {
+   "query": 74,
+   "n": 8,
+   "m": 8,
+   "gql_total": 12746,
+   "gql_fms": 8,
+   "ri_fms": 11,
+   "rand_fms": [
+    3295,
+    5369,
+    null
+   ],
+   "ri_total": 21874,
+   "rand_total": [
+    28782,
+    2015978,
+    null
+   ]
+  },
+  {
+   "query": 75,
+   "n": 8,
+   "m": 11,
+   "gql_total": 2508621,
+   "gql_fms": 172,
+   "ri_fms": 40,
+   "rand_fms": [
+    274277,
+    526344,
+    18592
+   ],
+   "ri_total": 2508725,
+   "rand_total": [
+    null,
+    null,
+    null
+   ]
+  },
+  {
+   "query": 76,
+   "n": 8,
+   "m": 8,
+   "gql_total": null,
+   "gql_fms": 8,
+   "ri_fms": 8,
+   "rand_fms": [
+    null,
+    1006,
+    183469
+   ]
+  },
+  {
+   "query": 77,
+   "n": 8,
+   "m": 10,
+   "gql_total": null,
+   "gql_fms": 8,
+   "ri_fms": 8,
+   "rand_fms": [
+    null,
+    12,
+    8
+   ]
+  },
+  {
+   "query": 78,
+   "n": 8,
+   "m": 8,
+   "gql_total": null,
+   "gql_fms": 8,
+   "ri_fms": 8,
+   "rand_fms": [
+    9,
+    8,
+    131
+   ]
+  },
+  {
+   "query": 79,
+   "n": 8,
+   "m": 9,
+   "gql_total": 133685,
+   "gql_fms": 13,
+   "ri_fms": 8,
+   "rand_fms": [
+    1764,
+    26,
+    null
+   ],
+   "ri_total": 122675,
+   "rand_total": [
+    2440462,
+    1525228,
+    null
+   ]
+  },
+  {
+   "query": 80,
+   "n": 8,
+   "m": 9,
+   "gql_total": 992414,
+   "gql_fms": 18,
+   "ri_fms": 10,
+   "rand_fms": [
+    436,
+    null,
+    513
+   ],
+   "ri_total": 983644,
+   "rand_total": [
+    null,
+    null,
+    1523962
+   ]
+  },
+  {
+   "query": 81,
+   "n": 8,
+   "m": 9,
+   "gql_total": null,
+   "gql_fms": 44,
+   "ri_fms": 8,
+   "rand_fms": [
+    378081,
+    5405,
+    8
+   ]
+  },
+  {
+   "query": 82,
+   "n": 8,
+   "m": 10,
+   "gql_total": 2503394,
+   "gql_fms": 55,
+   "ri_fms": 58,
+   "rand_fms": [
+    8,
+    7043,
+    50196
+   ],
+   "ri_total": 2651791,
+   "rand_total": [
+    2895090,
+    null,
+    null
+   ]
+  },
+  {
+   "query": 83,
+   "n": 8,
+   "m": 9,
+   "gql_total": null,
+   "gql_fms": 18,
+   "ri_fms": 8,
+   "rand_fms": [
+    536,
+    8,
+    17
+   ]
+  },
+  {
+   "query": 84,
+   "n": 8,
+   "m": 11,
+   "gql_total": 383124,
+   "gql_fms": 12,
+   "ri_fms": 128078,
+   "rand_fms": [
+    67,
+    null,
+    389575
+   ],
+   "ri_total": null,
+   "rand_total": [
+    null,
+    null,
+    2846833
+   ]
+  },
+  {
+   "query": 85,
+   "n": 8,
+   "m": 8,
+   "gql_total": null,
+   "gql_fms": 10,
+   "ri_fms": 8,
+   "rand_fms": [
+    1892,
+    11,
+    58
+   ]
+  },
+  {
+   "query": 86,
+   "n": 8,
+   "m": 10,
+   "gql_total": 1826,
+   "gql_fms": 13,
+   "ri_fms": 46,
+   "rand_fms": [
+    15,
+    278,
+    41842
+   ],
+   "ri_total": 1914,
+   "rand_total": [
+    62960,
+    5329,
+    81710
+   ]
+  },
+  {
+   "query": 87,
+   "n": 8,
+   "m": 11,
+   "gql_total": 42919,
+   "gql_fms": 13,
+   "ri_fms": 67,
+   "rand_fms": [
+    291369,
+    209235,
+    14893
+   ],
+   "ri_total": 32859,
+   "rand_total": [
+    649590,
+    577464,
+    578710
+   ]
+  },
+  {
+   "query": 88,
+   "n": 8,
+   "m": 8,
+   "gql_total": 574308,
+   "gql_fms": 18,
+   "ri_fms": 18,
+   "rand_fms": [
+    151911,
+    null,
+    null
+   ],
+   "ri_total": 560587,
+   "rand_total": [
+    906876,
+    null,
+    null
+   ]
+  },
+  {
+   "query": 89,
+   "n": 8,
+   "m": 9,
+   "gql_total": null,
+   "gql_fms": 8,
+   "ri_fms": 8,
+   "rand_fms": [
+    null,
+    8,
+    29581
+   ]
+  },
+  {
+   "query": 90,
+   "n": 8,
+   "m": 10,
+   "gql_total": null,
+   "gql_fms": 10,
+   "ri_fms": 8,
+   "rand_fms": [
+    214772,
+    1259,
+    11
+   ]
+  },
+  {
+   "query": 91,
+   "n": 8,
+   "m": 7,
+   "gql_total": null,
+   "gql_fms": 8,
+   "ri_fms": 11,
+   "rand_fms": [
+    8,
+    652,
+    28
+   ]
+  },
+  {
+   "query": 92,
+   "n": 8,
+   "m": 11,
+   "gql_total": 3083,
+   "gql_fms": 21,
+   "ri_fms": 17,
+   "rand_fms": [
+    45466,
+    176,
+    190
+   ],
+   "ri_total": 3314,
+   "rand_total": [
+    680563,
+    8068,
+    28201
+   ]
+  },
+  {
+   "query": 93,
+   "n": 8,
+   "m": 9,
+   "gql_total": null,
+   "gql_fms": 8,
+   "ri_fms": 8,
+   "rand_fms": [
+    11,
+    8,
+    8
+   ]
+  },
+  {
+   "query": 94,
+   "n": 8,
+   "m": 8,
+   "gql_total": null,
+   "gql_fms": 8,
+   "ri_fms": 9,
+   "rand_fms": [
+    2546,
+    null,
+    null
+   ]
+  },
+  {
+   "query": 95,
+   "n": 8,
+   "m": 9,
+   "gql_total": null,
+   "gql_fms": 8,
+   "ri_fms": 8,
+   "rand_fms": [
+    8,
+    8,
+    8
+   ]
+  },
+  {
+   "query": 96,
+   "n": 8,
+   "m": 9,
+   "gql_total": null,
+   "gql_fms": 8,
+   "ri_fms": 8,
+   "rand_fms": [
+    1821,
+    8,
+    70874
+   ]
+  },
+  {
+   "query": 97,
+   "n": 8,
+   "m": 8,
+   "gql_total": null,
+   "gql_fms": 8,
+   "ri_fms": 10,
+   "rand_fms": [
+    8172,
+    13,
+    7108
+   ]
+  },
+  {
+   "query": 98,
+   "n": 8,
+   "m": 7,
+   "gql_total": null,
+   "gql_fms": 8,
+   "ri_fms": 8,
+   "rand_fms": [
+    14,
+    303,
+    null
+   ]
+  },
+  {
+   "query": 99,
+   "n": 8,
+   "m": 9,
+   "gql_total": null,
+   "gql_fms": 9,
+   "ri_fms": 15,
+   "rand_fms": [
+    73569,
+    13,
+    22
+   ]
+  }
+ ]
+}
