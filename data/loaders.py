@@ -84,7 +84,27 @@ def load_lastfm() -> Graph:
     return Graph.from_edges(n, ((int(a), int(b)) for a, b in edges_rows), labels)
 
 
-LOADERS = {"hamster": load_hamster, "lastfm": load_lastfm}
+def load_rewired() -> Graph:
+    """Synthetic transfer target: Hamster with the same vertices, labels and
+    degrees, but the giant component's edges randomized (connected double-edge
+    swap, seed 0). The 16-label vocabulary is unchanged, so the Hamster-trained
+    inductive model applies directly; ~91% of edges differ from Hamster."""
+    import networkx as nx
+
+    base = load_hamster()
+    g = base.to_networkx()
+    comps = sorted(nx.connected_components(g), key=len, reverse=True)
+    giant = comps[0]
+    sub = g.subgraph(giant).copy()
+    nx.connected_double_edge_swap(sub, nswap=5 * sub.number_of_edges(), seed=0)
+    new_edges = set(sub.edges())
+    for a, b in g.edges():
+        if a not in giant or b not in giant:
+            new_edges.add((a, b))
+    return Graph.from_edges(base.n, new_edges, base.labels)
+
+
+LOADERS = {"hamster": load_hamster, "lastfm": load_lastfm, "rewired": load_rewired}
 
 
 def load(name: str) -> Graph:
