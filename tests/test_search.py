@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 from networkx.algorithms.isomorphism import GraphMatcher
 
-from search.enumerate import enumerate_matches
+from search.enumerate import SearchSpace, enumerate_matches, enumerate_space
 from search.filter import FILTERS
 from search.graph import Graph
 from search.order import ORDERS
@@ -246,6 +246,25 @@ def test_policy_requests_a_check_without_deciding_feasibility():
                                    pruning_policy=lambda branch: accept)
         assert result.complete and result.embeddings == [(0, 1, 2)]
         assert result.pruning.calls == (2 if accept else 0)
+
+
+def test_branch_replay_preserves_prefix_and_checks_descendants():
+    edges = [(0, 1), (1, 2), (2, 3)]
+    q = Graph.from_edges(4, edges, [0] * 4)
+    g = Graph.from_edges(5, edges, [0] * 5)
+    space = SearchSpace(q, g, [np.arange(5) for _ in range(4)], [3, 2, 1, 0])
+    visited = []
+
+    def visit(branch, mapping):
+        if branch.depth == 0:
+            visited.append(mapping[3])
+
+    original = enumerate_space(space, pruning="domains", before_check=visit)
+    assert original.pruning.cuts["empty_domain"] >= 1
+    assert 4 in visited
+    replay = enumerate_space(space, pruning="domains", prefix=(3, 2), store_embeddings=True)
+    assert replay.complete and replay.embeddings == [(0, 1, 2, 3)]
+    assert replay.steps == 2 and replay.pruning.calls == 1
 
 
 @pytest.mark.parametrize(("query_cycle", "target_cycle", "reason"), [

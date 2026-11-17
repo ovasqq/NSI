@@ -10,9 +10,10 @@ import torch
 from models.encoding import cls_id, collate, encode_query, encode_state, pad_id
 from models.hook import NeuGNReorder
 from models.neugn import NeuGN, NeuGNConfig
+from models.neugn_gate import CandidateGate
 from queries.euler import euler_sequence
 from queries.random_walk import sample_query
-from search.enumerate import enumerate_matches
+from search.enumerate import BranchState, enumerate_matches
 from search.filter import nlf_filter
 from search.graph import Graph
 from search.order import gql_order
@@ -120,6 +121,29 @@ def test_hook_preserves_completeness(g):
         res = enumerate_matches(q, g, cand, order, hook, store_embeddings=True)
         assert set(res.embeddings) == set(base.embeddings)
         assert res.steps == base.steps
+
+
+def test_candidate_gate_follows_ranked_candidates(g):
+    class CheckByEmbedding(torch.nn.Module):
+        def forward(self, state, candidates):
+            return candidates[..., 0]
+
+    model = small_model(g)
+    q = sample_query(g, 6, np.random.default_rng(1)).graph
+    candidates = [0, 1, 2, 3]
+    with torch.no_grad():
+        model.content_emb.weight[candidates, 0] = torch.tensor([-1., 1., -1., 1.])
+        model.out.weight.zero_()
+        model.out.bias[candidates] = torch.tensor([2., 4., 3., 1.])
+    hook = NeuGNReorder(model, q, max_depth=2, check_head=CheckByEmbedding())
+    assert hook(0, 0, [-1] * q.n, candidates) == [1, 2, 0, 3]
+    policy = CandidateGate.for_query(hook, g, q)
+    decisions = [policy(BranchState(0, 0, v, i, 4, i + 1, None, 0, 0))
+                 for i, v in enumerate([1, 2, 0, 3])]
+    assert decisions == [True, False, False, True]
+    assert policy(BranchState(2, 0, 0, 0, 4, 5, None, 0, 0))
+    assert policy(BranchState(0, 0, 0, 0, 1, 6, None, 0, 0))
+    assert (hook.gate_decisions, hook.gate_skips) == (4, 2)
 
 
 def test_hook_ranks_by_model_scores(g):

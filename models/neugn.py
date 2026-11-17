@@ -82,6 +82,16 @@ class NeuGN(nn.Module):
         (it depends only on Q, so search computes it once per query)."""
         return self.out(self.state_vector(batch, h_q))
 
+    def rank_and_check(
+        self, batch, candidates: torch.Tensor, check_head: nn.Module,
+        h_q: torch.Tensor | None = None,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Ranking logits over G and check logits for the requested (B, C) IDs."""
+        state = self.state_vector(batch, h_q)
+        ranks = self.out(state)
+        checks = check_head(state, self.content_emb(candidates))
+        return ranks, checks
+
     def state_vector(self, batch, h_q: torch.Tensor | None = None) -> torch.Tensor:
         """Transformer anchor before the vertex-ranking projection."""
         content = batch["content"]

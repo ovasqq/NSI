@@ -21,7 +21,8 @@ from search.graph import Graph
 class NeuGNReorder:
     def __init__(self, model: NeuGN, q: Graph, max_depth: int = 10,
                  device: str | torch.device = "cpu", shift: int = 0,
-                 *, capture_state: bool = False, capture_scores: bool = False):
+                 *, capture_state: bool = False, capture_scores: bool = False,
+                 check_head: torch.nn.Module | None = None, check_threshold: float = 0.0):
         self.model, self.max_depth, self.device, self.shift = model, max_depth, device, shift
         self.num_g = model.cfg.num_g
         # Fixed per query: Euler sequence from vertex 0, shift 0.
@@ -30,6 +31,9 @@ class NeuGNReorder:
         self.seconds = 0.0
         self.capture_state = capture_state
         self.capture_scores = capture_scores or capture_state
+        self.check_head, self.check_threshold = check_head, check_threshold
+        self.check_decisions: dict[int, list[bool]] = {}
+        self.gate_decisions = self.gate_skips = 0
         # Sibling candidates share a parent anchor. Descending only changes deeper entries.
         self.ranking_context: dict[int, tuple[torch.Tensor | None, torch.Tensor]] = {}
         with torch.inference_mode():
@@ -50,7 +54,16 @@ class NeuGNReorder:
             return cands
         t0 = time.perf_counter()
         state = None
-        if self.capture_state:
+        if self.check_head is not None:
+            with torch.inference_mode():
+                indices = torch.tensor([cands], device=self.device)
+                logits, checks = self.model.rank_and_check(
+                    self._batch(mapping, u), indices, self.check_head, self.h_q,
+                )
+                s, decisions = torch.stack(
+                    (logits.gather(1, indices)[0], (checks[0] > self.check_threshold)),
+                ).cpu()
+        elif self.capture_state:
             with torch.inference_mode():
                 state = self.model.state_vector(self._batch(mapping, u), self.h_q)
                 logits = self.model.out(state)[0]
@@ -60,6 +73,8 @@ class NeuGNReorder:
         else:
             s = self.scores(mapping, u, cands)
         order = torch.argsort(-s, stable=True).tolist()
+        if self.check_head is not None:
+            self.check_decisions[depth] = decisions[order].bool().tolist()
         if self.capture_scores:
             self.ranking_context[depth] = (state, s[order])
         self.calls += 1

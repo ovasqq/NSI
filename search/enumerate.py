@@ -48,6 +48,7 @@ PruningPolicy = Callable[[BranchState], bool]
 # Observers may copy the live mapping/used. The finish flag means the DFS
 # returned from this branch or found a match before being interrupted.
 BranchObserver = Callable[[BranchState, list[int], set[int]], Callable[[bool], None] | None]
+BranchVisitor = Callable[[BranchState, list[int]], None]
 
 
 @dataclass
@@ -118,21 +119,51 @@ def enumerate_matches(
     pruning_policy: PruningPolicy | None = None,
     branch_observer: BranchObserver | None = None,
 ) -> SearchResult:
+    return enumerate_space(
+        SearchSpace(q, g, cand, order), reorder, max_matches=max_matches, max_steps=max_steps,
+        store_embeddings=store_embeddings, validate=validate, pruning=pruning,
+        prune_after_steps=prune_after_steps, deadline=deadline, pruning_policy=pruning_policy,
+        branch_observer=branch_observer,
+    )
+
+
+def enumerate_space(
+    space: SearchSpace,
+    reorder: ReorderHook | None = None,
+    *,
+    max_matches: int | None = None,
+    max_steps: int | None = None,
+    store_embeddings: bool = False,
+    validate: bool = True,
+    pruning: str = "none",
+    prune_after_steps: int = 0,
+    deadline: float | None = None,
+    pruning_policy: PruningPolicy | None = None,
+    branch_observer: BranchObserver | None = None,
+    before_check: BranchVisitor | None = None,
+    prefix: Sequence[int] = (),
+) -> SearchResult:
     """Skip pruning for the first prune_after_steps attempts. The optional
-    deadline uses perf_counter() and is checked between search operations."""
+    deadline uses perf_counter(). A prefix contains already assigned data
+    vertices in search order and is assumed to come from a valid DFS branch."""
     if pruning not in PRUNING_MODES:
         raise ValueError(f"unknown pruning mode: {pruning!r}")
     if prune_after_steps < 0:
         raise ValueError("prune_after_steps must be nonnegative")
     if pruning_policy is not None and pruning == "none":
         raise ValueError("a pruning policy requires an exact pruning mode")
-    n = q.n
-    space = SearchSpace(q, g, cand, order)
+    n = space.q.n
+    order = space.order
+    if len(prefix) >= n and prefix:
+        raise ValueError("the prefix must leave at least one query vertex unassigned")
     pruner = ResidualPruner(space, pruning) if pruning != "none" else None
     mapping = [-1] * n
-    used: set[int] = set()
+    for u, v in zip(order, prefix):
+        mapping[u] = v
+    used = set(prefix)
     res = SearchResult(pruning=pruner.stats if pruner is not None else None)
-    track_branches = pruning_policy is not None or branch_observer is not None
+    track_history = pruning_policy is not None or branch_observer is not None
+    track_branches = track_history or before_check is not None
     backtracks = last_deadend_steps = 0
 
     def check_deadline(limit: float) -> None:
@@ -170,6 +201,8 @@ def enumerate_matches(
                     state = BranchState(i, u, v, rank, len(local), res.steps,
                                         None if max_steps is None else max_steps - res.steps,
                                         backtracks, last_deadend_steps)
+                if before_check is not None:
+                    before_check(state, mapping)
                 rejected = False
                 should_check = pruner is not None and res.steps > prune_after_steps
                 if should_check and pruning_policy is not None:
@@ -183,7 +216,7 @@ def enumerate_matches(
                     if deadline is not None:
                         check_deadline(deadline)
                 if not rejected:
-                    if track_branches:
+                    if track_history:
                         first_match_count = res.num_matches
                         finish = branch_observer(state, mapping, used) if branch_observer else None
                         completed = False
@@ -199,7 +232,7 @@ def enumerate_matches(
                             last_deadend_steps = res.steps - state.step
                     else:
                         dfs(i + 1)
-                elif track_branches:
+                elif track_history:
                     backtracks += 1
                     last_deadend_steps = 0
             used.discard(v)
@@ -208,8 +241,8 @@ def enumerate_matches(
     try:
         if deadline is not None:
             check_deadline(deadline)
-        if all(len(c) for c in cand):
-            dfs(0)
+        if all(len(c) for c in space.cand):
+            dfs(len(prefix))
         res.complete = True
     except _Stop:
         # Stopping exactly on the last leaf still leaves the tree unfinished

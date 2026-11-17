@@ -63,6 +63,8 @@ def run_query(
     extra = {}
     if hasattr(hook, "calls"):
         extra.update(model_calls=hook.calls, model_seconds=hook.seconds)
+    if getattr(hook, "check_head", None) is not None:
+        extra.update(gate_decisions=hook.gate_decisions, gate_skips=hook.gate_skips)
     if hasattr(hook, "probe_steps"):
         # Look-ahead work is charged as search steps; with k = 1 all probes
         # happen before the first match. Over budget in total = censored.
@@ -129,6 +131,8 @@ def summarize(records: list[dict], k: int, budget: int) -> dict:
         **({"pruning_stages": stages} if stages else {}),
         **({"pruning_policy_seconds": sum(r["pruning_policy_seconds"] for r in records)}
            if records and "pruning_policy_seconds" in records[0] else {}),
+        **({key: sum(r[key] for r in records) for key in ("gate_decisions", "gate_skips")}
+           if records and "gate_decisions" in records[0] else {}),
         **({"median_fms_with_probes": censored_median([r["fms_with_probes"] for r in records]),
             "solved_with_probes": sum(r["fms_with_probes"] is not None for r in records)}
            if records and "fms_with_probes" in records[0] else {}),
@@ -145,7 +149,7 @@ def random_hook(seed: int) -> ReorderHook:
     return hook
 
 
-def make_hook_factory(args, g, *, capture_scores=False, capture_state=False) -> HookFactory:
+def make_hook_factory(args, g, *, capture_scores=False, capture_state=False, gate=None) -> HookFactory:
     """Returns (q, g, cand, order) -> hook. Hooks are per query: NeuGN
     precomputes h_Q and the Euler sequence, Knuth probes need (C, φ)."""
     if args.method == "baseline":
@@ -171,9 +175,11 @@ def make_hook_factory(args, g, *, capture_scores=False, capture_state=False) -> 
 
         model = load_model(Path(args.checkpoint), args.device)
     if args.method == "neugn":
+        check_head = gate.attach(model) if gate is not None else None
         return lambda q, g, cand, order: NeuGNReorder(
             model, q, args.max_depth, args.device,
-            capture_scores=capture_scores, capture_state=capture_state)
+            capture_scores=capture_scores, capture_state=capture_state, check_head=check_head,
+            check_threshold=gate.threshold if gate is not None else 0.0)
     if args.method in ("knuth", "neugn_pc"):
         def factory(q, g, cand, order):
             nav = NeuGNReorder(model, q, args.max_depth, args.device) if model else None
@@ -216,6 +222,8 @@ def main() -> None:
     ap.add_argument("--query-offset", type=int, default=0, help="skip the first N queries")
     policy_options = ap.add_mutually_exclusive_group()
     policy_options.add_argument("--pruning-controller", type=Path, help="trained pruning readout")
+    policy_options.add_argument("--pruning-gate", type=Path,
+                                help="NeuGN candidate check output; always check outside ranking nodes")
     policy_options.add_argument("--pruning-every", type=int, help="check every N eligible branches")
     ap.add_argument("--check-unranked", action="store_true",
                     help="run domains outside the policy's ranking nodes")
@@ -230,7 +238,7 @@ def main() -> None:
         ap.error("--pruning-every must be positive")
     if args.check_unranked and args.pruning_controller is None and args.pruning_every is None:
         ap.error("--check-unranked requires a pruning policy")
-    if args.pruning_controller is not None or args.pruning_every is not None:
+    if any(policy is not None for policy in (args.pruning_controller, args.pruning_every, args.pruning_gate)):
         if args.method != "neugn" or args.pruning != "domains" or args.checkpoint is None:
             ap.error("pruning policies require --method neugn --pruning domains --checkpoint PATH")
     if args.time_limit is not None and (not math.isfinite(args.time_limit) or args.time_limit <= 0):
@@ -242,8 +250,13 @@ def main() -> None:
     queries = queries[args.query_offset:][:args.limit]
     if not queries:
         ap.error("no queries in the selected range")
-    controller = policy_factory = None
-    if args.pruning_controller is not None:
+    controller = gate = policy_factory = None
+    if args.pruning_gate is not None:
+        from models.neugn_gate import CandidateGate
+
+        gate = CandidateGate(args.pruning_gate, Path(args.checkpoint), args.graph, args.max_depth)
+        policy_factory = gate.for_query
+    elif args.pruning_controller is not None:
         from models.pruning_controller import LearnedPruning
 
         controller = LearnedPruning(args.pruning_controller, Path(args.checkpoint))
@@ -264,7 +277,7 @@ def main() -> None:
 
             return periodic
     factory = make_hook_factory(args, g, capture_scores=controller is not None,
-                                capture_state=controller is not None and controller.use_anchor)
+                                capture_state=controller is not None and controller.use_anchor, gate=gate)
 
     query_iter = enumerate(queries, start=args.query_offset)
     if args.progress:
@@ -294,6 +307,8 @@ def main() -> None:
         tag += f"_{args.tag}"
     if args.pruning_controller is not None:
         tag += f"_controller_{args.pruning_controller.stem}"
+    if args.pruning_gate is not None:
+        tag += f"_gate_{args.pruning_gate.stem}"
     if args.pruning_every is not None:
         tag += f"_every{args.pruning_every}"
     if args.check_unranked:
@@ -305,6 +320,8 @@ def main() -> None:
     config = vars(args).copy()
     if args.pruning_controller is not None:
         config["pruning_controller"] = str(args.pruning_controller)
+    if args.pruning_gate is not None:
+        config["pruning_gate"] = str(args.pruning_gate)
     out.write_text(json.dumps(dict(config=config, query_set=qmeta,
                                    summary=summary, records=records), indent=1))
     print(f"{tag}: solved {summary['solved']}/{summary['queries']}, "
