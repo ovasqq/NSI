@@ -186,6 +186,7 @@ def main() -> None:
     ap.add_argument("--k", type=int, default=1)
     ap.add_argument("--budget", type=int, default=1_000_000)
     ap.add_argument("--limit", type=int, default=None, help="use only the first N queries")
+    ap.add_argument("--progress", action="store_true", help="show per-query progress (requires tqdm)")
     ap.add_argument("--seed", type=int, default=0)
     args = ap.parse_args()
 
@@ -195,8 +196,18 @@ def main() -> None:
     queries = queries[: args.limit]
     factory = make_hook_factory(args, g)
 
+    query_iter = enumerate(queries)
+    if args.progress:
+        try:
+            from tqdm import tqdm
+        except ImportError:
+            ap.error("--progress requires tqdm; install it with python -m pip install tqdm")
+        description = f"{args.graph} {args.size} {args.density} / {args.method} / {args.pruning}"
+        query_iter = tqdm(query_iter, total=len(queries), desc=description, unit="query",
+                          mininterval=2, dynamic_ncols=True)
+
     records = []
-    for i, q in enumerate(queries):
+    for i, q in query_iter:
         r = run_query(q.graph, g, factory, filter_name=args.filter, order_name=args.order,
                       k=args.k, budget=args.budget, pruning=args.pruning)
         records.append(dict(query=i, **r))

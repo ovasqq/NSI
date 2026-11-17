@@ -9,7 +9,7 @@
 ```bash
 .venv/bin/python -m experiments.fms --graph hamster --size 20 --density dense \
     [--method baseline|random|neugn] [--filter nlf|ldf] [--order gql|ri] \
-    [--k 1] [--budget 1000000] [--limit N] [--seed 0] [--tag SUFFIX] \
+    [--k 1] [--budget 1000000] [--limit N] [--progress] [--seed 0] [--tag SUFFIX] \
     [--checkpoint checkpoints/<graph>/<run>/model.pt] [--max-depth 10] [--device cpu] \
     [--pruning none|arc|domains|motifs] \
     [--pc-depth 3] [--probes 4] [--alpha 1.0] [--query-set path.json]
@@ -32,6 +32,7 @@
   - суммарное `total_seconds` и, при включённых проверках, их суммарная статистика;
   - для методов со спусками: `solved_with_probes`, `median_fms_with_probes`.
 - `--query-set` — взять набор запросов из файла (например, валидационный `data/queries/hamster_val/…`) вместо стандартного.
+- `--progress` — показывать прогресс по завершённым запросам. Установить `tqdm` в окружении запуска можно через `python -m pip install tqdm`.
 - **Методы** (`make_hook_factory(args)` возвращает функцию «запрос → хук»; хук создаётся заново для каждого запроса):
   - `baseline` — без хука, кандидаты по возрастанию id;
   - `random` — равновероятная случайная перестановка на каждой глубине (sanity check: NeuGN должен быть лучше и того и другого);
