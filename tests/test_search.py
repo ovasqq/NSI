@@ -12,7 +12,7 @@ from search.enumerate import SearchSpace, enumerate_matches, enumerate_space
 from search.filter import FILTERS
 from search.graph import Graph
 from search.order import ORDERS
-from search.pruning import PRUNING_MODES
+from search.pruning import PRUNING_MODES, DeepPruning, ResidualPruner
 
 N_CASES = 300
 
@@ -201,6 +201,49 @@ def test_matching_detects_conflict_with_nonempty_domains():
         assert stages["arc_consistency"].calls == (mode == "domains")
         assert all(stage.seconds >= 0 for stage in stages.values())
         assert sum(stage.seconds for stage in stages.values()) <= result.pruning.seconds
+
+
+def test_deep_arc_gate_uses_matched_domains_and_rechecks_after_shrinkage():
+    q = Graph.from_edges(4, [(0, 1), (0, 2), (0, 3), (1, 2)], [0] * 4)
+    g = Graph.from_edges(5, [(0, 1), (0, 2), (0, 3), (0, 4), (1, 2)], [0] * 5)
+    candidates = [np.array(row) for row in ([0], [1, 2, 3], [1, 2, 4], [1, 2])]
+    space = SearchSpace(q, g, candidates, list(range(q.n)))
+    gate_inputs = []
+
+    def gate(depth, domains):
+        gate_inputs.append((depth, domains.copy()))
+        return True
+
+    pruner = ResidualPruner(space, "domains", DeepPruning(0, "adaptive", lambda _: gate))
+    assert pruner.rejects(1, [0, -1, -1, -1], {0})
+    assert gate_inputs == [(1, {1: frozenset({1, 2, 3}), 2: frozenset({1, 2, 4}), 3: frozenset({1, 2})})]
+    assert pruner.stats.cuts == {"all_different": 1}
+    assert pruner.stats.stages["matching"].calls == 2
+    assert pruner.stats.stages["build_domains"].calls == 1
+
+    gate_inputs.clear()
+    candidates[1:3] = [np.array([1]), np.array([1])]
+    space = SearchSpace(q, g, candidates, list(range(q.n)))
+    pruner = ResidualPruner(space, "domains", DeepPruning(0, "adaptive", lambda _: gate))
+    assert pruner.rejects(1, [0, -1, -1, -1], {0})
+    assert pruner.stats.cuts == {"all_different": 1}
+    assert pruner.stats.stages["arc_consistency"].calls == 0
+    assert not gate_inputs
+
+
+def test_deep_pruning_boundary_counts_assignments():
+    q = g = Graph.from_edges(4, [(0, 1), (1, 2), (2, 3)], [0] * 4)
+    cand = [np.array([i]) for i in range(q.n)]
+    options = {"domains": None, "none": DeepPruning(2, "none"),
+               "forward": DeepPruning(2, "forward"), "matching": DeepPruning(2, "matching"),
+               "adaptive": DeepPruning(2, "adaptive", lambda _: lambda depth, domains: False)}
+    for mode, deep in options.items():
+        result = enumerate_matches(q, g, cand, list(range(q.n)), pruning="domains",
+                                   deep_pruning=deep, store_embeddings=True)
+        assert result.complete and result.embeddings == [(0, 1, 2, 3)]
+        assert result.pruning.calls == (2 if mode == "none" else 3)
+        assert result.pruning.stages["arc_consistency"].calls == (3 if mode == "domains" else 2)
+        assert result.pruning.stages["matching"].calls == (2 if mode in ("none", "forward") else 3)
 
 
 def test_delayed_pruning_continues_from_current_state():

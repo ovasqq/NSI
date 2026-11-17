@@ -24,7 +24,7 @@ from typing import Callable, Sequence
 import numpy as np
 
 from search.graph import Graph
-from search.pruning import PRUNING_MODES, PruningStats, ResidualPruner
+from search.pruning import PRUNING_MODES, DeepPruning, PruningStats, ResidualPruner
 
 # hook(depth, u, mapping, candidates) -> permutation of candidates.
 # `mapping[w]` is the image of query vertex w, or -1 if w is not mapped yet.
@@ -114,6 +114,7 @@ def enumerate_matches(
     store_embeddings: bool = False,
     validate: bool = True,
     pruning: str = "none",
+    deep_pruning: DeepPruning | None = None,
     prune_after_steps: int = 0,
     deadline: float | None = None,
     pruning_policy: PruningPolicy | None = None,
@@ -121,7 +122,7 @@ def enumerate_matches(
 ) -> SearchResult:
     return enumerate_space(
         SearchSpace(q, g, cand, order), reorder, max_matches=max_matches, max_steps=max_steps,
-        store_embeddings=store_embeddings, validate=validate, pruning=pruning,
+        store_embeddings=store_embeddings, validate=validate, pruning=pruning, deep_pruning=deep_pruning,
         prune_after_steps=prune_after_steps, deadline=deadline, pruning_policy=pruning_policy,
         branch_observer=branch_observer,
     )
@@ -136,6 +137,7 @@ def enumerate_space(
     store_embeddings: bool = False,
     validate: bool = True,
     pruning: str = "none",
+    deep_pruning: DeepPruning | None = None,
     prune_after_steps: int = 0,
     deadline: float | None = None,
     pruning_policy: PruningPolicy | None = None,
@@ -152,11 +154,13 @@ def enumerate_space(
         raise ValueError("prune_after_steps must be nonnegative")
     if pruning_policy is not None and pruning == "none":
         raise ValueError("a pruning policy requires an exact pruning mode")
+    if deep_pruning is not None and pruning != "domains":
+        raise ValueError("deep pruning overrides require domains as the base mode")
     n = space.q.n
     order = space.order
     if len(prefix) >= n and prefix:
         raise ValueError("the prefix must leave at least one query vertex unassigned")
-    pruner = ResidualPruner(space, pruning) if pruning != "none" else None
+    pruner = ResidualPruner(space, pruning, deep_pruning) if pruning != "none" else None
     mapping = [-1] * n
     for u, v in zip(order, prefix):
         mapping[u] = v

@@ -6,15 +6,33 @@ from collections import deque
 from dataclasses import dataclass, field
 from math import prod
 from time import perf_counter
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Callable
 
 if TYPE_CHECKING:
     from search.enumerate import SearchSpace
 
 
 PRUNING_MODES = ("none", "forward", "matching", "arc", "domains", "motifs")
+DEEP_MODES = ("none", "forward", "matching", "adaptive")
+Domains = dict[int, frozenset[int]]
+ArcPolicy = Callable[[int, Domains], bool]
 # Limit the Cartesian product of a motif's domains before attempting its search.
 MAX_MOTIF_PRODUCT = 4096
+
+
+@dataclass(frozen=True)
+class DeepPruning:
+    """Override domains after the first full_depth assignments."""
+
+    full_depth: int
+    mode: str
+    arc_policy_factory: Callable[[SearchSpace], ArcPolicy] | None = None
+
+    def __post_init__(self):
+        if self.full_depth < 0 or self.mode not in DEEP_MODES:
+            raise ValueError("invalid deep pruning configuration")
+        if (self.mode == "adaptive") != (self.arc_policy_factory is not None):
+            raise ValueError("only adaptive deep pruning requires an AC-3 policy")
 
 
 @dataclass
@@ -28,6 +46,7 @@ class PruningStats:
     calls: int = 0
     seconds: float = 0.0
     motif_checks: int = 0
+    arc_policy_checks: int = 0
     cuts: dict[str, int] = field(default_factory=dict)
     stages: dict[str, PruningStageStats] = field(default_factory=lambda: {
         name: PruningStageStats()
@@ -42,18 +61,28 @@ class PruningStats:
 
 
 class ResidualPruner:
-    def __init__(self, space: SearchSpace, mode: str):
+    def __init__(self, space: SearchSpace, mode: str, deep: DeepPruning | None = None):
         started = perf_counter()
+        if deep is not None and mode != "domains":
+            raise ValueError("deep pruning overrides require domains as the base mode")
         self.space = space
+        self.deep = deep
         self.stats = PruningStats()
+        self.arc_policy = None
+        if deep is not None and deep.arc_policy_factory is not None:
+            self.arc_policy = deep.arc_policy_factory(space)
+            self.stats.stages["arc_policy"] = PruningStageStats()
         self.use_arc = mode in ("arc", "domains", "motifs")
         self.use_matching = mode in ("matching", "domains", "motifs")
         self.motifs = self._find_motifs() if mode == "motifs" else ()
         self.stats.seconds = perf_counter() - started
 
     def rejects(self, depth: int, mapping: list[int], used: set[int]) -> bool:
+        mode = self.deep.mode if self.deep is not None and depth > self.deep.full_depth else None
+        if mode == "none":
+            return False
         started = perf_counter()
-        reason = self._conflict(depth, mapping, used)
+        reason = self._conflict(depth, mapping, used, mode)
         self.stats.calls += 1
         self.stats.seconds += perf_counter() - started
         if reason is None:
@@ -61,26 +90,32 @@ class ResidualPruner:
         self.stats.cuts[reason] = self.stats.cuts.get(reason, 0) + 1
         return True
 
-    def _conflict(self, depth: int, mapping: list[int], used: set[int]) -> str | None:
+    def _conflict(self, depth: int, mapping: list[int], used: set[int], mode: str | None) -> str | None:
         started = perf_counter()
-        domains = self._build_domains(depth, mapping, used)
+        domains = self.build_domains(depth, mapping, used)
         self.stats.record_stage("build_domains", started)
         if domains is None:
             return "empty_domain"
 
-        if self.use_arc:
-            started = perf_counter()
-            consistent = self._propagate_arcs(domains)
-            self.stats.record_stage("arc_consistency", started)
-            if not consistent:
-                return "arc_consistency"
-
-        if self.use_matching:
-            started = perf_counter()
-            covered = _covers_all(domains)
-            self.stats.record_stage("matching", started)
-            if not covered:
+        if mode == "forward":
+            return None
+        if mode in ("matching", "adaptive"):
+            if not self.covers_matching(domains):
                 return "all_different"
+            if mode == "adaptive":
+                started = perf_counter()
+                check = self.arc_policy(depth, domains)
+                self.stats.record_stage("arc_policy", started)
+                if check:
+                    self.stats.arc_policy_checks += 1
+                    return self.extra_arc_conflict(domains)
+            return None
+
+        if self.use_arc and not self.check_arcs(domains):
+            return "arc_consistency"
+
+        if self.use_matching and not self.covers_matching(domains):
+            return "all_different"
 
         if self.motifs:
             started = perf_counter()
@@ -89,7 +124,7 @@ class ResidualPruner:
             return reason
         return None
 
-    def _build_domains(
+    def build_domains(
         self, depth: int, mapping: list[int], used: set[int]
     ) -> dict[int, frozenset[int]] | None:
         space = self.space
@@ -103,6 +138,27 @@ class ResidualPruner:
                 return None
             domains[u] = candidates
         return domains
+
+    def covers_matching(self, domains: Domains) -> bool:
+        started = perf_counter()
+        covered = _covers_all(domains)
+        self.stats.record_stage("matching", started)
+        return covered
+
+    def check_arcs(self, domains: Domains) -> bool:
+        started = perf_counter()
+        consistent = self._propagate_arcs(domains)
+        self.stats.record_stage("arc_consistency", started)
+        return consistent
+
+    def extra_arc_conflict(self, domains: Domains) -> str | None:
+        """Run AC-3 after a successful matching and recheck if domains shrink."""
+        before = domains.copy()
+        if not self.check_arcs(domains):
+            return "arc_consistency"
+        if any(domains[u] is not old for u, old in before.items()) and not self.covers_matching(domains):
+            return "all_different"
+        return None
 
     def _propagate_arcs(self, domains: dict[int, frozenset[int]]) -> bool:
         # AC-3: a candidate must have at least one support across every query edge.

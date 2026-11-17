@@ -27,7 +27,7 @@ from search.enumerate import PruningPolicy, ReorderHook, enumerate_matches
 from search.filter import FILTERS
 from search.graph import Graph
 from search.order import ORDERS
-from search.pruning import PRUNING_MODES
+from search.pruning import PRUNING_MODES, DeepPruning
 
 RESULTS_DIR = Path(__file__).resolve().parent / "results"
 
@@ -45,6 +45,7 @@ def run_query(
     k: int = 1,
     budget: int = 1_000_000,
     pruning: str = "none",
+    deep_pruning: DeepPruning | None = None,
     prune_after_steps: int = 0,
     time_limit: float | None = None,
     pruning_policy_factory: Callable[[ReorderHook, Graph, Graph], PruningPolicy] | None = None,
@@ -56,7 +57,7 @@ def run_query(
     policy = pruning_policy_factory(hook, g, q) if pruning_policy_factory else None
     t1 = time.perf_counter()
     res = enumerate_matches(q, g, cand, order, hook, max_matches=k, max_steps=budget,
-                            pruning=pruning, prune_after_steps=prune_after_steps,
+                            pruning=pruning, deep_pruning=deep_pruning, prune_after_steps=prune_after_steps,
                             deadline=None if time_limit is None else t0 + time_limit,
                             pruning_policy=policy)
     t2 = time.perf_counter()
@@ -80,6 +81,8 @@ def run_query(
                      })
     if policy is not None:
         extra["pruning_policy_seconds"] = res.pruning_policy_seconds
+    if deep_pruning is not None and deep_pruning.mode == "adaptive":
+        extra["arc_policy_checks"] = res.pruning.arc_policy_checks
     return dict(
         n=q.n,
         m=q.m,
@@ -131,6 +134,8 @@ def summarize(records: list[dict], k: int, budget: int) -> dict:
         **({"pruning_stages": stages} if stages else {}),
         **({"pruning_policy_seconds": sum(r["pruning_policy_seconds"] for r in records)}
            if records and "pruning_policy_seconds" in records[0] else {}),
+        **({"arc_policy_checks": sum(r["arc_policy_checks"] for r in records)}
+           if records and "arc_policy_checks" in records[0] else {}),
         **({key: sum(r[key] for r in records) for key in ("gate_decisions", "gate_skips")}
            if records and "gate_decisions" in records[0] else {}),
         **({"median_fms_with_probes": censored_median([r["fms_with_probes"] for r in records]),
