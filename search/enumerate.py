@@ -23,6 +23,7 @@ from typing import Callable, Sequence
 import numpy as np
 
 from search.graph import Graph
+from search.pruning import PRUNING_MODES, PruningStats, ResidualPruner
 
 # hook(depth, u, mapping, candidates) -> permutation of candidates.
 # `mapping[w]` is the image of query vertex w, or -1 if w is not mapped yet.
@@ -36,8 +37,9 @@ class SearchResult:
     # match_steps[k] = step counter when the (k+1)-th embedding was found.
     match_steps: list[int] = field(default_factory=list)
     embeddings: list[tuple[int, ...]] = field(default_factory=list)
-    # True iff the whole search tree was traversed (no limit was hit).
+    # True iff all branches were explored or proved infeasible (no limit was hit).
     complete: bool = False
+    pruning: PruningStats | None = None
 
     @property
     def first_match_step(self) -> int | None:
@@ -88,12 +90,16 @@ def enumerate_matches(
     max_steps: int | None = None,
     store_embeddings: bool = False,
     validate: bool = True,
+    pruning: str = "none",
 ) -> SearchResult:
+    if pruning not in PRUNING_MODES:
+        raise ValueError(f"unknown pruning mode: {pruning!r}")
     n = q.n
     space = SearchSpace(q, g, cand, order)
+    pruner = ResidualPruner(space, pruning) if pruning != "none" else None
     mapping = [-1] * n
     used: set[int] = set()
-    res = SearchResult()
+    res = SearchResult(pruning=pruner.stats if pruner is not None else None)
 
     def dfs(i: int) -> None:
         u = order[i]
@@ -116,7 +122,7 @@ def enumerate_matches(
                     res.embeddings.append(tuple(mapping))
                 if max_matches is not None and res.num_matches >= max_matches:
                     raise _Stop
-            else:
+            elif pruner is None or not pruner.rejects(i + 1, mapping, used):
                 dfs(i + 1)
             used.discard(v)
             mapping[u] = -1

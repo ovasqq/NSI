@@ -3,6 +3,7 @@
 import random
 
 import networkx as nx
+import numpy as np
 import pytest
 from networkx.algorithms.isomorphism import GraphMatcher
 
@@ -10,6 +11,7 @@ from search.enumerate import enumerate_matches
 from search.filter import FILTERS
 from search.graph import Graph
 from search.order import ORDERS
+from search.pruning import PRUNING_MODES
 
 N_CASES = 300
 
@@ -144,3 +146,66 @@ def test_limits():
         if full.steps >= 2:
             cut = enumerate_matches(q, g, cand, order, max_steps=full.steps - 1)
             assert not cut.complete and cut.steps == full.steps - 1
+
+
+def test_pruning_preserves_embedding_order():
+    for _, q, g in cases(seed=17):
+        cand = FILTERS["nlf"](q, g)
+        order = ORDERS["gql"](q, cand)
+
+        def reverse_candidates(depth, u, mapping, local):
+            return local[::-1]
+
+        base = enumerate_matches(q, g, cand, order, reverse_candidates, store_embeddings=True)
+        assert set(base.embeddings) == nx_embeddings(q, g)
+        for mode in PRUNING_MODES[1:]:
+            result = enumerate_matches(q, g, cand, order, reverse_candidates,
+                                       store_embeddings=True, pruning=mode)
+            assert result.complete
+            assert result.embeddings == base.embeddings
+            assert result.steps <= base.steps
+            first = enumerate_matches(q, g, cand, order, reverse_candidates, max_matches=1,
+                                      store_embeddings=True, pruning=mode)
+            assert first.embeddings == base.embeddings[:1]
+            if base.embeddings:
+                assert first.first_match_step <= base.first_match_step
+
+
+@pytest.mark.parametrize(("last_domain", "reason"), [([0], "empty_domain"), ([3], "arc_consistency")])
+def test_empty_and_unsupported_domains(last_domain, reason):
+    q = Graph.from_edges(3, [(0, 1), (1, 2)], [0] * 3)
+    g = Graph.from_edges(4, [(0, 1), (1, 2)], [0] * 4)
+    cand = [np.array(v) for v in ([0], [1], last_domain)]
+    result = enumerate_matches(q, g, cand, [0, 1, 2], pruning="domains", max_steps=1)
+    assert result.complete and result.steps == 1 and result.num_matches == 0
+    assert result.pruning.cuts == {reason: 1}
+
+
+def test_matching_detects_conflict_with_nonempty_domains():
+    g = q = Graph.from_edges(4, [(0, 1), (0, 2), (0, 3)], [0] * 4)
+    cand = [np.array(v) for v in ([0], [1], [1], [2, 3])]
+    arc = enumerate_matches(q, g, cand, [0, 1, 2, 3], pruning="arc", max_steps=1)
+    result = enumerate_matches(q, g, cand, [0, 1, 2, 3], pruning="domains", max_steps=1)
+    assert not arc.complete and not arc.pruning.cuts
+    assert result.complete and result.steps == 1 and result.num_matches == 0
+    assert result.pruning.cuts == {"all_different": 1}
+
+
+@pytest.mark.parametrize(("query_cycle", "target_cycle", "reason"), [
+    (3, 6, "triangle"), (4, 5, "four_cycle"),
+])
+def test_motifs_detect_conflicts_that_domains_miss(query_cycle, target_cycle, reason):
+    def wheel(size):
+        cycle = [(u + 1, (u + 1) % size + 1) for u in range(size)]
+        return Graph.from_edges(size + 1, cycle + [(0, u) for u in range(1, size + 1)],
+                                [1] + [0] * size)
+
+    q, g = wheel(query_cycle), wheel(target_cycle)
+    cand = FILTERS["nlf"](q, g)
+    order = list(range(q.n))
+    domains = enumerate_matches(q, g, cand, order, pruning="domains", max_steps=1)
+    motifs = enumerate_matches(q, g, cand, order, pruning="motifs", max_steps=1)
+    assert not domains.complete and domains.steps == 1 and not domains.pruning.cuts
+    assert motifs.complete and motifs.steps == 1 and motifs.num_matches == 0
+    assert motifs.pruning.motif_checks == 1
+    assert motifs.pruning.cuts == {reason: 1}

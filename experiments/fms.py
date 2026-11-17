@@ -16,6 +16,7 @@ import json
 import math
 import statistics
 import time
+from collections import Counter
 from pathlib import Path
 from typing import Callable
 
@@ -27,6 +28,7 @@ from search.enumerate import ReorderHook, enumerate_matches
 from search.filter import FILTERS
 from search.graph import Graph
 from search.order import ORDERS
+from search.pruning import PRUNING_MODES
 
 RESULTS_DIR = Path(__file__).resolve().parent / "results"
 
@@ -43,13 +45,15 @@ def run_query(
     order_name: str = "gql",
     k: int = 1,
     budget: int = 1_000_000,
+    pruning: str = "none",
 ) -> dict:
     t0 = time.perf_counter()
     cand = FILTERS[filter_name](q, g)
     order = ORDERS[order_name](q, cand)
     hook = factory(q, g, cand, order)
     t1 = time.perf_counter()
-    res = enumerate_matches(q, g, cand, order, hook, max_matches=k, max_steps=budget)
+    res = enumerate_matches(q, g, cand, order, hook, max_matches=k, max_steps=budget,
+                            pruning=pruning)
     t2 = time.perf_counter()
     extra = {}
     if hasattr(hook, "calls"):
@@ -60,6 +64,9 @@ def run_query(
         total = None if res.first_match_step is None else res.first_match_step + hook.probe_steps
         extra.update(probe_steps=hook.probe_steps,
                      fms_with_probes=total if total is not None and total <= budget else None)
+    if res.pruning is not None:
+        extra.update(pruning_calls=res.pruning.calls, pruning_seconds=res.pruning.seconds,
+                     motif_checks=res.pruning.motif_checks, pruning_cuts=res.pruning.cuts)
     return dict(
         n=q.n,
         m=q.m,
@@ -69,6 +76,7 @@ def run_query(
         complete=res.complete,
         filter_seconds=t1 - t0,
         search_seconds=t2 - t1,
+        total_seconds=t2 - t0,
         **extra,
     )
 
@@ -81,6 +89,9 @@ def censored_median(values: list[int | None]) -> float:
 def summarize(records: list[dict], k: int, budget: int) -> dict:
     fms = [r["fms"] for r in records]
     kth = [r["match_steps"][k - 1] if len(r["match_steps"]) >= k else None for r in records]
+    cuts: Counter[str] = Counter()
+    for r in records:
+        cuts.update(r.get("pruning_cuts", {}))
     return dict(
         queries=len(records),
         solved=sum(v is not None for v in fms),
@@ -91,6 +102,12 @@ def summarize(records: list[dict], k: int, budget: int) -> dict:
         steps_per_second=sum(r["steps"] for r in records)
         / max(sum(r["search_seconds"] for r in records), 1e-9),
         budget=budget,
+        total_seconds=sum(r.get("total_seconds", r.get("filter_seconds", 0.0) + r["search_seconds"])
+                          for r in records),
+        **({"pruning_calls": sum(r["pruning_calls"] for r in records),
+            "pruning_seconds": sum(r["pruning_seconds"] for r in records),
+            "motif_checks": sum(r["motif_checks"] for r in records),
+            "pruning_cuts": dict(cuts)} if records and "pruning_calls" in records[0] else {}),
         **({"median_fms_with_probes": censored_median([r["fms_with_probes"] for r in records]),
             "solved_with_probes": sum(r["fms_with_probes"] is not None for r in records)}
            if records and "fms_with_probes" in records[0] else {}),
@@ -164,6 +181,8 @@ def main() -> None:
     ap.add_argument("--tag", default=None, help="extra suffix for the result file name")
     ap.add_argument("--filter", default="nlf", choices=sorted(FILTERS))
     ap.add_argument("--order", default="gql", choices=sorted(ORDERS))
+    ap.add_argument("--pruning", default="none", choices=PRUNING_MODES,
+                    help="exact residual checks: arc consistency, plus matching (domains), or plus motifs")
     ap.add_argument("--k", type=int, default=1)
     ap.add_argument("--budget", type=int, default=1_000_000)
     ap.add_argument("--limit", type=int, default=None, help="use only the first N queries")
@@ -179,11 +198,13 @@ def main() -> None:
     records = []
     for i, q in enumerate(queries):
         r = run_query(q.graph, g, factory, filter_name=args.filter, order_name=args.order,
-                      k=args.k, budget=args.budget)
+                      k=args.k, budget=args.budget, pruning=args.pruning)
         records.append(dict(query=i, **r))
 
     summary = summarize(records, args.k, args.budget)
     tag = f"{args.graph}_size{args.size}_{args.density}_{args.method}_{args.filter}_{args.order}_k{args.k}"
+    if args.pruning != "none":
+        tag += f"_pruning_{args.pruning}"
     if args.tag:
         tag += f"_{args.tag}"
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -195,6 +216,7 @@ def main() -> None:
           f"median steps to {args.k} {fmt(summary['median_steps_to_k'])}, "
           + (f"with probes: solved {summary['solved_with_probes']}, median "
              f"{fmt(summary['median_fms_with_probes'])}, " if "solved_with_probes" in summary else "")
+          + f"{summary['total_seconds']:.3f}s total, "
           + f"{summary['steps_per_second']:,.0f} steps/s -> {out.name}")
 
 
