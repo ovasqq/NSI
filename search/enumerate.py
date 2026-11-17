@@ -1,6 +1,6 @@
 """Backtracking enumeration with a candidate-reordering hook.
 
-Definition of a *step* (used for FMS and every budget in this project):
+Definition of a *step* (used for FMS and the step budget):
 one attempted extension (u, v) of the partial mapping, i.e. one iteration of
 the loop over local candidates C_M(u) — equivalently, one non-root node of the
 search tree. The step that completes an embedding is counted. Vertices of G
@@ -18,6 +18,7 @@ every call, so a hook can never prune the search (completeness).
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from time import perf_counter
 from typing import Callable, Sequence
 
 import numpy as np
@@ -40,6 +41,7 @@ class SearchResult:
     # True iff all branches were explored or proved infeasible (no limit was hit).
     complete: bool = False
     pruning: PruningStats | None = None
+    timed_out: bool = False
 
     @property
     def first_match_step(self) -> int | None:
@@ -91,15 +93,26 @@ def enumerate_matches(
     store_embeddings: bool = False,
     validate: bool = True,
     pruning: str = "none",
+    prune_after_steps: int = 0,
+    deadline: float | None = None,
 ) -> SearchResult:
+    """Skip pruning for the first prune_after_steps attempts. The optional
+    deadline uses perf_counter() and is checked between search operations."""
     if pruning not in PRUNING_MODES:
         raise ValueError(f"unknown pruning mode: {pruning!r}")
+    if prune_after_steps < 0:
+        raise ValueError("prune_after_steps must be nonnegative")
     n = q.n
     space = SearchSpace(q, g, cand, order)
     pruner = ResidualPruner(space, pruning) if pruning != "none" else None
     mapping = [-1] * n
     used: set[int] = set()
     res = SearchResult(pruning=pruner.stats if pruner is not None else None)
+
+    def check_deadline(limit: float) -> None:
+        if perf_counter() >= limit:
+            res.timed_out = True
+            raise _Stop
 
     def dfs(i: int) -> None:
         u = order[i]
@@ -110,6 +123,8 @@ def enumerate_matches(
                 raise ValueError("reorder hook must return a permutation of its candidates")
             local = new
         for v in local:
+            if deadline is not None:
+                check_deadline(deadline)
             if max_steps is not None and res.steps >= max_steps:
                 raise _Stop
             res.steps += 1
@@ -122,12 +137,20 @@ def enumerate_matches(
                     res.embeddings.append(tuple(mapping))
                 if max_matches is not None and res.num_matches >= max_matches:
                     raise _Stop
-            elif pruner is None or not pruner.rejects(i + 1, mapping, used):
-                dfs(i + 1)
+            else:
+                rejected = False
+                if pruner is not None and res.steps > prune_after_steps:
+                    rejected = pruner.rejects(i + 1, mapping, used)
+                    if deadline is not None:
+                        check_deadline(deadline)
+                if not rejected:
+                    dfs(i + 1)
             used.discard(v)
             mapping[u] = -1
 
     try:
+        if deadline is not None:
+            check_deadline(deadline)
         if all(len(c) for c in cand):
             dfs(0)
         res.complete = True

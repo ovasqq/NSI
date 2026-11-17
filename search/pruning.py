@@ -12,7 +12,7 @@ if TYPE_CHECKING:
     from search.enumerate import SearchSpace
 
 
-PRUNING_MODES = ("none", "arc", "domains", "motifs")
+PRUNING_MODES = ("none", "forward", "matching", "arc", "domains", "motifs")
 # Limit the Cartesian product of a motif's domains before attempting its search.
 MAX_MOTIF_PRODUCT = 4096
 
@@ -46,7 +46,8 @@ class ResidualPruner:
         started = perf_counter()
         self.space = space
         self.stats = PruningStats()
-        self.use_matching = mode in ("domains", "motifs")
+        self.use_arc = mode in ("arc", "domains", "motifs")
+        self.use_matching = mode in ("matching", "domains", "motifs")
         self.motifs = self._find_motifs() if mode == "motifs" else ()
         self.stats.seconds = perf_counter() - started
 
@@ -67,11 +68,12 @@ class ResidualPruner:
         if domains is None:
             return "empty_domain"
 
-        started = perf_counter()
-        consistent = self._propagate_arcs(domains)
-        self.stats.record_stage("arc_consistency", started)
-        if not consistent:
-            return "arc_consistency"
+        if self.use_arc:
+            started = perf_counter()
+            consistent = self._propagate_arcs(domains)
+            self.stats.record_stage("arc_consistency", started)
+            if not consistent:
+                return "arc_consistency"
 
         if self.use_matching:
             started = perf_counter()

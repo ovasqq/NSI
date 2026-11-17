@@ -3,10 +3,9 @@
     python -m experiments.fms --graph hamster --size 20 --density dense
 
 For every query of a stored query set, the enumerator runs until k embeddings
-are found or the step budget is exhausted. A query not solved within the
-budget is *censored*: its FMS is only known to exceed the budget. The median
-is computed with censored values set to +inf, so it is exact as long as fewer
-than half of the queries are censored, and reported as "> budget" otherwise.
+are found, the tree is exhausted, or a step/time limit is reached. Missing FMS
+values are treated as +inf for the reported median. With a time limit this
+summary combines the search effort and the fraction solved before the limit.
 """
 
 from __future__ import annotations
@@ -46,6 +45,8 @@ def run_query(
     k: int = 1,
     budget: int = 1_000_000,
     pruning: str = "none",
+    prune_after_steps: int = 0,
+    time_limit: float | None = None,
 ) -> dict:
     t0 = time.perf_counter()
     cand = FILTERS[filter_name](q, g)
@@ -53,7 +54,8 @@ def run_query(
     hook = factory(q, g, cand, order)
     t1 = time.perf_counter()
     res = enumerate_matches(q, g, cand, order, hook, max_matches=k, max_steps=budget,
-                            pruning=pruning)
+                            pruning=pruning, prune_after_steps=prune_after_steps,
+                            deadline=None if time_limit is None else t0 + time_limit)
     t2 = time.perf_counter()
     extra = {}
     if hasattr(hook, "calls"):
@@ -74,10 +76,11 @@ def run_query(
     return dict(
         n=q.n,
         m=q.m,
-        fms=res.first_match_step,  # None = censored (> budget)
+        fms=res.first_match_step,
         match_steps=res.match_steps,  # steps at the 1st..k-th embedding
         steps=res.steps,
         complete=res.complete,
+        timed_out=res.timed_out,
         filter_seconds=t1 - t0,
         search_seconds=t2 - t1,
         total_seconds=t2 - t0,
@@ -108,6 +111,7 @@ def summarize(records: list[dict], k: int, budget: int) -> dict:
         median_steps_to_k=censored_median(kth),
         # A tree exhausted without k matches is not a budget failure.
         exhausted_without_k=sum(r["complete"] and len(r["match_steps"]) < k for r in records),
+        timed_out=sum(r.get("timed_out", False) for r in records),
         steps_per_second=sum(r["steps"] for r in records)
         / max(sum(r["search_seconds"] for r in records), 1e-9),
         budget=budget,
@@ -192,13 +196,21 @@ def main() -> None:
     ap.add_argument("--filter", default="nlf", choices=sorted(FILTERS))
     ap.add_argument("--order", default="gql", choices=sorted(ORDERS))
     ap.add_argument("--pruning", default="none", choices=PRUNING_MODES,
-                    help="exact residual checks: arc consistency, plus matching (domains), or plus motifs")
+                    help="residual checks: forward (empty domains), matching, arc, domains (arc and matching), or motifs")
+    ap.add_argument("--prune-after-steps", type=int, default=0,
+                    help="skip pruning for the first N assignment attempts without restarting DFS")
     ap.add_argument("--k", type=int, default=1)
     ap.add_argument("--budget", type=int, default=1_000_000)
+    ap.add_argument("--time-limit", type=float, default=None,
+                    help="soft wall-clock limit in seconds per query, including setup")
     ap.add_argument("--limit", type=int, default=None, help="use only the first N queries")
     ap.add_argument("--progress", action="store_true", help="show per-query progress (requires tqdm)")
     ap.add_argument("--seed", type=int, default=0)
     args = ap.parse_args()
+    if args.prune_after_steps < 0:
+        ap.error("--prune-after-steps must be nonnegative")
+    if args.time_limit is not None and (not math.isfinite(args.time_limit) or args.time_limit <= 0):
+        ap.error("--time-limit must be finite and positive")
 
     g = load(args.graph)
     qpath = Path(args.query_set) if args.query_set else query_set_path(args.graph, args.size, args.density)
@@ -219,13 +231,16 @@ def main() -> None:
     records = []
     for i, q in query_iter:
         r = run_query(q.graph, g, factory, filter_name=args.filter, order_name=args.order,
-                      k=args.k, budget=args.budget, pruning=args.pruning)
+                      k=args.k, budget=args.budget, pruning=args.pruning,
+                      prune_after_steps=args.prune_after_steps, time_limit=args.time_limit)
         records.append(dict(query=i, **r))
 
     summary = summarize(records, args.k, args.budget)
     tag = f"{args.graph}_size{args.size}_{args.density}_{args.method}_{args.filter}_{args.order}_k{args.k}"
     if args.pruning != "none":
         tag += f"_pruning_{args.pruning}"
+        if args.prune_after_steps:
+            tag += f"_after{args.prune_after_steps}"
     if args.tag:
         tag += f"_{args.tag}"
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -237,6 +252,7 @@ def main() -> None:
           f"median steps to {args.k} {fmt(summary['median_steps_to_k'])}, "
           + (f"with probes: solved {summary['solved_with_probes']}, median "
              f"{fmt(summary['median_fms_with_probes'])}, " if "solved_with_probes" in summary else "")
+          + (f"time limit reached on {summary['timed_out']}, " if args.time_limit is not None else "")
           + f"{summary['total_seconds']:.3f}s total, "
           + f"{summary['steps_per_second']:,.0f} steps/s -> {out.name}")
 

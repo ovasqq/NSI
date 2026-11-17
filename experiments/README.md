@@ -11,14 +11,14 @@
     [--method baseline|random|neugn] [--filter nlf|ldf] [--order gql|ri] \
     [--k 1] [--budget 1000000] [--limit N] [--progress] [--seed 0] [--tag SUFFIX] \
     [--checkpoint checkpoints/<graph>/<run>/model.pt] [--max-depth 10] [--device cpu] \
-    [--pruning none|arc|domains|motifs] \
+    [--pruning none|forward|matching|arc|domains|motifs] [--prune-after-steps N] [--time-limit SECONDS] \
     [--pc-depth 3] [--probes 4] [--alpha 1.0] [--query-set path.json]
 ```
 
 - **`run_query(q, g, factory, *, filter_name, order_name, k, budget, pruning) -> dict`** — один запрос: фильтр → порядок → `factory(q, g, cand, order)` создаёт хук → перебор до k вложений или исчерпания бюджета шагов. Возвращает:
   - `fms` — шаг первого вложения. `None` при `complete=true` означает, что поиск доказал отсутствие вложений. `None` при `complete=false` означает, что вложение не найдено за бюджет;
   - `match_steps` — шаги 1-го … k-го вложений;
-  - `steps`, `complete`;
+  - `steps`, `complete`, `timed_out` (остановка по времени);
   - `filter_seconds`, `search_seconds`, `total_seconds` — время подготовки запроса, поиска и их сумма;
   - при `--pruning` в одном из [режимов проверок](../search/README.md#pruningpy--проверки-остаточной-задачи) пишутся `pruning_calls`, `pruning_seconds`, `motif_checks` и `pruning_cuts` по причинам. Внутренняя работа проверок входит во время поиска. Бюджет по-прежнему ограничивает назначения DFS;
   - `pruning_stages` разбивает проверки по стадиям `build_domains`, `arc_consistency`, `matching` и `motifs`. У каждой указаны `calls` и `seconds` по запросу и суммарно в `summary`. `motifs.calls` считает запуски стадии выбора и проверки мотивов, а `motif_checks` — проверенные мотивы. Общий `pruning_seconds` также включает подготовку проверок и служебную работу каскада.
@@ -33,6 +33,8 @@
   - суммарное `total_seconds` и, при включённых проверках, их суммарная статистика;
   - для методов со спусками: `solved_with_probes`, `median_fms_with_probes`.
 - `--query-set` — взять набор запросов из файла (например, валидационный `data/queries/hamster_val/…`) вместо стандартного.
+- `--prune-after-steps N` — первые N пробных назначений проходят без отсечений, затем включается выбранный режим в той же ветви DFS. Порог общий на весь запрос.
+- `--time-limit SECONDS` — мягкий лимит времени на запрос с учётом подготовки и поиска. Уже начатая операция может завершиться после лимита. Лимит шагов действует одновременно.
 - `--progress` — показывать прогресс по завершённым запросам. Установить `tqdm` в окружении запуска можно через `python -m pip install tqdm`.
 - **Методы** (`make_hook_factory(args)` возвращает функцию «запрос → хук»; хук создаётся заново для каждого запроса):
   - `baseline` — без хука, кандидаты по возрастанию id;

@@ -1,6 +1,7 @@
 """Stage-1 checks: the enumerator agrees with networkx and is order-invariant."""
 
 import random
+from time import perf_counter
 
 import networkx as nx
 import numpy as np
@@ -189,14 +190,35 @@ def test_matching_detects_conflict_with_nonempty_domains():
     g = q = Graph.from_edges(4, [(0, 1), (0, 2), (0, 3)], [0] * 4)
     cand = [np.array(v) for v in ([0], [1], [1], [2, 3])]
     arc = enumerate_matches(q, g, cand, [0, 1, 2, 3], pruning="arc", max_steps=1)
-    result = enumerate_matches(q, g, cand, [0, 1, 2, 3], pruning="domains", max_steps=1)
     assert not arc.complete and not arc.pruning.cuts
     assert arc.pruning.stages["matching"].calls == 0
-    assert result.complete and result.steps == 1 and result.num_matches == 0
-    assert result.pruning.cuts == {"all_different": 1}
-    assert result.pruning.stages["matching"].calls == 1
-    assert all(stage.seconds >= 0 for stage in result.pruning.stages.values())
-    assert sum(stage.seconds for stage in result.pruning.stages.values()) <= result.pruning.seconds
+    for mode in ("matching", "domains"):
+        result = enumerate_matches(q, g, cand, [0, 1, 2, 3], pruning=mode, max_steps=1)
+        assert result.complete and result.steps == 1 and result.num_matches == 0
+        assert result.pruning.cuts == {"all_different": 1}
+        stages = result.pruning.stages
+        assert stages["matching"].calls == 1
+        assert stages["arc_consistency"].calls == (mode == "domains")
+        assert all(stage.seconds >= 0 for stage in stages.values())
+        assert sum(stage.seconds for stage in stages.values()) <= result.pruning.seconds
+
+
+def test_delayed_pruning_continues_from_current_state():
+    g = q = Graph.from_edges(3, [(0, 1), (1, 2)], [0] * 3)
+    cand = [np.array([u]) for u in range(q.n)]
+    for delay, expected_calls in ((0, 2), (1, 1), (3, 0)):
+        result = enumerate_matches(q, g, cand, [0, 1, 2], pruning="matching",
+                                   prune_after_steps=delay, store_embeddings=True)
+        assert result.complete and result.steps == 3
+        assert result.embeddings == [(0, 1, 2)]
+        assert result.pruning.calls == expected_calls
+
+
+def test_deadline_does_not_report_an_exhausted_tree():
+    g = q = Graph.from_edges(2, [(0, 1)], [0] * 2)
+    cand = [np.array([0]), np.array([1])]
+    result = enumerate_matches(q, g, cand, [0, 1], deadline=perf_counter() - 1)
+    assert result.timed_out and not result.complete and result.steps == 0
 
 
 @pytest.mark.parametrize(("query_cycle", "target_cycle", "reason"), [
