@@ -221,6 +221,13 @@ def test_deep_arc_gate_uses_matched_domains_and_rechecks_after_shrinkage():
     assert pruner.stats.stages["matching"].calls == 2
     assert pruner.stats.stages["build_domains"].calls == 1
 
+    fixed = ResidualPruner(space, "domains", DeepPruning(0, "matching_arc"))
+    assert fixed.rejects(1, [0, -1, -1, -1], {0})
+    assert fixed.stats.cuts == pruner.stats.cuts
+    assert fixed.stats.stages["matching"].calls == 2
+    assert fixed.stats.stages["arc_consistency"].calls == 1
+    assert "arc_policy" not in fixed.stats.stages
+
     gate_inputs.clear()
     candidates[1:3] = [np.array([1]), np.array([1])]
     space = SearchSpace(q, g, candidates, list(range(q.n)))
@@ -229,6 +236,10 @@ def test_deep_arc_gate_uses_matched_domains_and_rechecks_after_shrinkage():
     assert pruner.stats.cuts == {"all_different": 1}
     assert pruner.stats.stages["arc_consistency"].calls == 0
     assert not gate_inputs
+    fixed = ResidualPruner(space, "domains", DeepPruning(0, "matching_arc"))
+    assert fixed.rejects(1, [0, -1, -1, -1], {0})
+    assert fixed.stats.cuts == {"all_different": 1}
+    assert fixed.stats.stages["arc_consistency"].calls == 0
 
 
 def test_deep_pruning_boundary_counts_assignments():
@@ -236,13 +247,14 @@ def test_deep_pruning_boundary_counts_assignments():
     cand = [np.array([i]) for i in range(q.n)]
     options = {"domains": None, "none": DeepPruning(2, "none"),
                "forward": DeepPruning(2, "forward"), "matching": DeepPruning(2, "matching"),
+               "matching_arc": DeepPruning(2, "matching_arc"),
                "adaptive": DeepPruning(2, "adaptive", lambda _: lambda depth, domains: False)}
     for mode, deep in options.items():
         result = enumerate_matches(q, g, cand, list(range(q.n)), pruning="domains",
                                    deep_pruning=deep, store_embeddings=True)
         assert result.complete and result.embeddings == [(0, 1, 2, 3)]
         assert result.pruning.calls == (2 if mode == "none" else 3)
-        assert result.pruning.stages["arc_consistency"].calls == (3 if mode == "domains" else 2)
+        assert result.pruning.stages["arc_consistency"].calls == (3 if mode in ("domains", "matching_arc") else 2)
         assert result.pruning.stages["matching"].calls == (2 if mode in ("none", "forward") else 3)
 
 

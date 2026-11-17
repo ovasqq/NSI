@@ -13,7 +13,7 @@ if TYPE_CHECKING:
 
 
 PRUNING_MODES = ("none", "forward", "matching", "arc", "domains", "motifs")
-DEEP_MODES = ("none", "forward", "matching", "adaptive")
+DEEP_MODES = ("none", "forward", "matching", "matching_arc", "adaptive")
 Domains = dict[int, frozenset[int]]
 ArcPolicy = Callable[[int, Domains], bool]
 # Limit the Cartesian product of a motif's domains before attempting its search.
@@ -99,9 +99,11 @@ class ResidualPruner:
 
         if mode == "forward":
             return None
-        if mode in ("matching", "adaptive"):
+        if mode in ("matching", "matching_arc", "adaptive"):
             if not self.covers_matching(domains):
                 return "all_different"
+            if mode == "matching_arc":
+                return self.extra_arc_conflict(domains)
             if mode == "adaptive":
                 started = perf_counter()
                 check = self.arc_policy(depth, domains)

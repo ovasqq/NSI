@@ -25,7 +25,7 @@ from search.pruning import DeepPruning, ResidualPruner
 from train import deep_arc
 from train.train_neugn import load_model
 
-MODES = ("domains", "none", "forward", "matching", "adaptive")
+MODES = ("domains", "none", "forward", "matching", "matching_arc", "adaptive")
 DENSITIES = ("dense", "sparse")
 
 
@@ -185,10 +185,13 @@ def write_json(path, data):
 def test(g, model, sets, args, readout, threshold):
     configs = dict(domains=None, none=DeepPruning(args.depth, "none"),
                    forward=DeepPruning(args.depth, "forward"), matching=DeepPruning(args.depth, "matching"),
+                   matching_arc=DeepPruning(args.depth, "matching_arc"),
                    adaptive=DeepPruning(args.depth, "adaptive", readout.policy(threshold)))
+    output = args.results_output or args.output
+    output.mkdir(parents=True, exist_ok=True)
     table = []
     for (size, density), split in sets.items():
-        for mode in MODES:
+        for mode in args.test_modes:
             records = results(g, model, split["test"], args, configs[mode])
             summary = summarize(records, 1, args.budget)
             for key in ("median_fms", "median_steps_to_k"):
@@ -207,24 +210,27 @@ def test(g, model, sets, args, readout, threshold):
                        gate_checks=summary.get("arc_policy_checks"),
                        gate_seconds=stages.get("arc_policy", {}).get("seconds"))
             table.append(row)
-            write_json(args.output / f"size{size}_{density}_{mode}.json",
+            write_json(output / f"size{size}_{density}_{mode}.json",
                        dict(config=dict(size=size, density=density, mode=mode, depth=args.depth,
                                         budget=args.budget, time_limit=args.time_limit, device=args.device),
                             query_set=split["metadata"], summary=summary, records=records))
             print(f"Test {size}/{density}/{mode}: {row['solved']}/{row['queries']} solved, "
                   f"{row['total_seconds']:.3f}s", flush=True)
-    with (args.output / "summary.csv").open("w", newline="") as stream:
+    with (output / "summary.csv").open("w", newline="") as stream:
         writer = csv.DictWriter(stream, fieldnames=list(table[0]))
         writer.writeheader()
         writer.writerows(table)
+    print(f"Saved {len(table)} runs to {output / 'summary.csv'}", flush=True)
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--output", type=Path, required=True)
+    parser.add_argument("--results-output", type=Path, help="write test results separately from training files")
     parser.add_argument("--checkpoint", type=Path, default=Path("checkpoints/hamster/paper/model.pt"))
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--phase", choices=("all", "train", "test"), default="all")
+    parser.add_argument("--test-modes", choices=MODES, nargs="+", default=MODES)
     parser.add_argument("--sizes", type=int, nargs="+", default=[8, 10, 12, 16, 20, 24, 32])
     parser.add_argument("--depth", type=int, default=10)
     parser.add_argument("--train-queries", type=int, default=100)
@@ -241,6 +247,7 @@ def main():
     args = parser.parse_args()
     if (args.depth < 0 or args.seed < 0 or min(args.sizes) < 2
             or len(set(args.sizes)) != len(args.sizes)
+            or len(set(args.test_modes)) != len(args.test_modes)
             or min(args.train_queries, args.validation_queries, args.test_queries,
                    args.samples, args.stride, args.budget, args.epochs) < 1
             or any(not math.isfinite(v) or v <= 0 for v in (args.horizon_ms, args.trace_seconds, args.time_limit))):
@@ -268,7 +275,6 @@ def main():
         write_json(protocol_file, protocol)
     if args.phase != "train":
         test(g, model, sets, args, readout, threshold)
-        print(f"Saved {len(sets) * len(MODES)} runs to {args.output / 'summary.csv'}", flush=True)
 
 
 if __name__ == "__main__":
