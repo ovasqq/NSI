@@ -20,13 +20,18 @@ from search.graph import Graph
 
 class NeuGNReorder:
     def __init__(self, model: NeuGN, q: Graph, max_depth: int = 10,
-                 device: str | torch.device = "cpu", shift: int = 0):
+                 device: str | torch.device = "cpu", shift: int = 0,
+                 *, capture_state: bool = False, capture_scores: bool = False):
         self.model, self.max_depth, self.device, self.shift = model, max_depth, device, shift
         self.num_g = model.cfg.num_g
         # Fixed per query: Euler sequence from vertex 0, shift 0.
         self.qenc = encode_query(q, euler_sequence(q))
         self.calls = 0
         self.seconds = 0.0
+        self.capture_state = capture_state
+        self.capture_scores = capture_scores or capture_state
+        # Sibling candidates share a parent anchor. Descending only changes deeper entries.
+        self.ranking_context: dict[int, tuple[torch.Tensor | None, torch.Tensor]] = {}
         with torch.inference_mode():
             probe = self._batch([-1] * q.n, 0)
             self.h_q = model.query_vector(probe)
@@ -44,8 +49,19 @@ class NeuGNReorder:
         if depth >= self.max_depth:
             return cands
         t0 = time.perf_counter()
-        s = self.scores(mapping, u, cands)
+        state = None
+        if self.capture_state:
+            with torch.inference_mode():
+                state = self.model.state_vector(self._batch(mapping, u), self.h_q)
+                logits = self.model.out(state)[0]
+                indices = torch.tensor(cands, device=logits.device)
+                s = logits[indices].cpu()
+                state = state[0].cpu()
+        else:
+            s = self.scores(mapping, u, cands)
         order = torch.argsort(-s, stable=True).tolist()
+        if self.capture_scores:
+            self.ranking_context[depth] = (state, s[order])
         self.calls += 1
         self.seconds += time.perf_counter() - t0
         return [cands[i] for i in order]

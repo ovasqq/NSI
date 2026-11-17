@@ -221,6 +221,33 @@ def test_deadline_does_not_report_an_exhausted_tree():
     assert result.timed_out and not result.complete and result.steps == 0
 
 
+def test_branch_observation_distinguishes_first_match_from_step_limit():
+    g = q = Graph.from_edges(3, [(0, 1), (1, 2)], [0] * 3)
+    cand = [np.array([0]), np.array([1]), np.array([2])]
+    observed = []
+
+    def observe(branch, mapping, used):
+        assert mapping[branch.vertex] == branch.candidate and branch.candidate in used
+        return lambda resolved: observed.append((branch.depth, resolved))
+
+    enumerate_matches(q, g, cand, [0, 1, 2], max_matches=1, max_steps=2, branch_observer=observe)
+    assert observed == [(1, False), (0, False)]
+    observed.clear()
+    enumerate_matches(q, g, cand, [0, 1, 2], max_matches=1, branch_observer=observe)
+    assert observed == [(1, True), (0, True)]
+
+
+def test_policy_requests_a_check_without_deciding_feasibility():
+    q = Graph.from_edges(3, [(0, 1), (1, 2)], [0] * 3)
+    g = Graph.from_edges(4, [(0, 1), (1, 2)], [0] * 4)
+    cand = [np.array([0]), np.array([1]), np.array([2, 3])]
+    for accept in (False, True):
+        result = enumerate_matches(q, g, cand, [0, 1, 2], pruning="domains", store_embeddings=True,
+                                   pruning_policy=lambda branch: accept)
+        assert result.complete and result.embeddings == [(0, 1, 2)]
+        assert result.pruning.calls == (2 if accept else 0)
+
+
 @pytest.mark.parametrize(("query_cycle", "target_cycle", "reason"), [
     (3, 6, "triangle"), (4, 5, "four_cycle"),
 ])

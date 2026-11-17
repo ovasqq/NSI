@@ -80,6 +80,10 @@ class NeuGN(nn.Module):
     def forward(self, batch, h_q: torch.Tensor | None = None) -> torch.Tensor:
         """Returns logits (B, |V(G)|). `h_q` may be passed in precomputed
         (it depends only on Q, so search computes it once per query)."""
+        return self.out(self.state_vector(batch, h_q))
+
+    def state_vector(self, batch, h_q: torch.Tensor | None = None) -> torch.Tensor:
+        """Transformer anchor before the vertex-ranking projection."""
         content = batch["content"]
         b, L = content.shape
         if L + 2 > self.pos_emb.num_embeddings:
@@ -98,4 +102,4 @@ class NeuGN(nn.Module):
             [torch.ones(b, 2, dtype=torch.bool, device=x.device), batch["tok_mask"]], dim=1
         )
         x = self.encoder(x, src_key_padding_mask=~keep)
-        return self.out(x[:, 1])
+        return x[:, 1]

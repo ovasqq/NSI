@@ -31,6 +31,25 @@ from search.pruning import PRUNING_MODES, PruningStats, ResidualPruner
 ReorderHook = Callable[[int, int, list[int], list[int]], Sequence[int]]
 
 
+@dataclass(frozen=True, slots=True)
+class BranchState:
+    depth: int  # depth of the vertex just assigned, before descending
+    vertex: int
+    candidate: int
+    rank: int
+    width: int
+    step: int
+    steps_remaining: int | None
+    backtracks: int
+    last_deadend_steps: int
+
+
+PruningPolicy = Callable[[BranchState], bool]
+# Observers may copy the live mapping/used. The finish flag means the DFS
+# returned from this branch or found a match before being interrupted.
+BranchObserver = Callable[[BranchState, list[int], set[int]], Callable[[bool], None] | None]
+
+
 @dataclass
 class SearchResult:
     num_matches: int = 0
@@ -42,6 +61,7 @@ class SearchResult:
     complete: bool = False
     pruning: PruningStats | None = None
     timed_out: bool = False
+    pruning_policy_seconds: float = 0.0
 
     @property
     def first_match_step(self) -> int | None:
@@ -95,6 +115,8 @@ def enumerate_matches(
     pruning: str = "none",
     prune_after_steps: int = 0,
     deadline: float | None = None,
+    pruning_policy: PruningPolicy | None = None,
+    branch_observer: BranchObserver | None = None,
 ) -> SearchResult:
     """Skip pruning for the first prune_after_steps attempts. The optional
     deadline uses perf_counter() and is checked between search operations."""
@@ -102,12 +124,16 @@ def enumerate_matches(
         raise ValueError(f"unknown pruning mode: {pruning!r}")
     if prune_after_steps < 0:
         raise ValueError("prune_after_steps must be nonnegative")
+    if pruning_policy is not None and pruning == "none":
+        raise ValueError("a pruning policy requires an exact pruning mode")
     n = q.n
     space = SearchSpace(q, g, cand, order)
     pruner = ResidualPruner(space, pruning) if pruning != "none" else None
     mapping = [-1] * n
     used: set[int] = set()
     res = SearchResult(pruning=pruner.stats if pruner is not None else None)
+    track_branches = pruning_policy is not None or branch_observer is not None
+    backtracks = last_deadend_steps = 0
 
     def check_deadline(limit: float) -> None:
         if perf_counter() >= limit:
@@ -115,6 +141,7 @@ def enumerate_matches(
             raise _Stop
 
     def dfs(i: int) -> None:
+        nonlocal backtracks, last_deadend_steps
         u = order[i]
         local = space.local_candidates(i, mapping, used)
         if reorder is not None and len(local) > 1:
@@ -122,7 +149,7 @@ def enumerate_matches(
             if validate and sorted(new) != local:
                 raise ValueError("reorder hook must return a permutation of its candidates")
             local = new
-        for v in local:
+        for rank, v in enumerate(local):
             if deadline is not None:
                 check_deadline(deadline)
             if max_steps is not None and res.steps >= max_steps:
@@ -138,13 +165,43 @@ def enumerate_matches(
                 if max_matches is not None and res.num_matches >= max_matches:
                     raise _Stop
             else:
+                state = None
+                if track_branches:
+                    state = BranchState(i, u, v, rank, len(local), res.steps,
+                                        None if max_steps is None else max_steps - res.steps,
+                                        backtracks, last_deadend_steps)
                 rejected = False
-                if pruner is not None and res.steps > prune_after_steps:
+                should_check = pruner is not None and res.steps > prune_after_steps
+                if should_check and pruning_policy is not None:
+                    started = perf_counter()
+                    should_check = pruning_policy(state)
+                    res.pruning_policy_seconds += perf_counter() - started
+                    if deadline is not None:
+                        check_deadline(deadline)
+                if should_check:
                     rejected = pruner.rejects(i + 1, mapping, used)
                     if deadline is not None:
                         check_deadline(deadline)
                 if not rejected:
-                    dfs(i + 1)
+                    if track_branches:
+                        first_match_count = res.num_matches
+                        finish = branch_observer(state, mapping, used) if branch_observer else None
+                        completed = False
+                        try:
+                            dfs(i + 1)
+                            completed = True
+                        finally:
+                            found = res.num_matches > first_match_count
+                            if finish is not None:
+                                finish(completed or found)
+                        if not found:
+                            backtracks += 1
+                            last_deadend_steps = res.steps - state.step
+                    else:
+                        dfs(i + 1)
+                elif track_branches:
+                    backtracks += 1
+                    last_deadend_steps = 0
             used.discard(v)
             mapping[u] = -1
 

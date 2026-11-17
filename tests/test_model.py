@@ -132,5 +132,10 @@ def test_hook_ranks_by_model_scores(g):
     s = hook.scores([-1] * q.n, 0, cands)
     assert sorted(out) == cands
     assert [s[cands.index(v)] for v in out] == sorted(s.tolist(), reverse=True)
+    traced = NeuGNReorder(model, q, capture_state=True)
+    assert traced(0, 0, [-1] * q.n, cands) == out
+    anchor, ranked_scores = traced.ranking_context[0]
+    assert anchor.shape == (model.cfg.d,)
+    torch.testing.assert_close(ranked_scores, s.sort(descending=True).values)
     # Beyond max_depth the baseline order is kept.
     assert hook(10, 0, [-1] * q.n, cands) == cands

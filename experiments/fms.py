@@ -23,7 +23,7 @@ import numpy as np
 
 from data.loaders import load
 from queries.storage import load_query_set, query_set_path
-from search.enumerate import ReorderHook, enumerate_matches
+from search.enumerate import PruningPolicy, ReorderHook, enumerate_matches
 from search.filter import FILTERS
 from search.graph import Graph
 from search.order import ORDERS
@@ -47,15 +47,18 @@ def run_query(
     pruning: str = "none",
     prune_after_steps: int = 0,
     time_limit: float | None = None,
+    pruning_policy_factory: Callable[[ReorderHook, Graph, Graph], PruningPolicy] | None = None,
 ) -> dict:
     t0 = time.perf_counter()
     cand = FILTERS[filter_name](q, g)
     order = ORDERS[order_name](q, cand)
     hook = factory(q, g, cand, order)
+    policy = pruning_policy_factory(hook, g, q) if pruning_policy_factory else None
     t1 = time.perf_counter()
     res = enumerate_matches(q, g, cand, order, hook, max_matches=k, max_steps=budget,
                             pruning=pruning, prune_after_steps=prune_after_steps,
-                            deadline=None if time_limit is None else t0 + time_limit)
+                            deadline=None if time_limit is None else t0 + time_limit,
+                            pruning_policy=policy)
     t2 = time.perf_counter()
     extra = {}
     if hasattr(hook, "calls"):
@@ -73,6 +76,8 @@ def run_query(
                          name: dict(calls=stage.calls, seconds=stage.seconds)
                          for name, stage in res.pruning.stages.items()
                      })
+    if policy is not None:
+        extra["pruning_policy_seconds"] = res.pruning_policy_seconds
     return dict(
         n=q.n,
         m=q.m,
@@ -122,6 +127,8 @@ def summarize(records: list[dict], k: int, budget: int) -> dict:
             "motif_checks": sum(r["motif_checks"] for r in records),
             "pruning_cuts": dict(cuts)} if records and "pruning_calls" in records[0] else {}),
         **({"pruning_stages": stages} if stages else {}),
+        **({"pruning_policy_seconds": sum(r["pruning_policy_seconds"] for r in records)}
+           if records and "pruning_policy_seconds" in records[0] else {}),
         **({"median_fms_with_probes": censored_median([r["fms_with_probes"] for r in records]),
             "solved_with_probes": sum(r["fms_with_probes"] is not None for r in records)}
            if records and "fms_with_probes" in records[0] else {}),
@@ -138,7 +145,7 @@ def random_hook(seed: int) -> ReorderHook:
     return hook
 
 
-def make_hook_factory(args, g) -> HookFactory:
+def make_hook_factory(args, g, *, capture_scores=False, capture_state=False) -> HookFactory:
     """Returns (q, g, cand, order) -> hook. Hooks are per query: NeuGN
     precomputes h_Q and the Euler sequence, Knuth probes need (C, φ)."""
     if args.method == "baseline":
@@ -164,7 +171,9 @@ def make_hook_factory(args, g) -> HookFactory:
 
         model = load_model(Path(args.checkpoint), args.device)
     if args.method == "neugn":
-        return lambda q, g, cand, order: NeuGNReorder(model, q, args.max_depth, args.device)
+        return lambda q, g, cand, order: NeuGNReorder(
+            model, q, args.max_depth, args.device,
+            capture_scores=capture_scores, capture_state=capture_state)
     if args.method in ("knuth", "neugn_pc"):
         def factory(q, g, cand, order):
             nav = NeuGNReorder(model, q, args.max_depth, args.device) if model else None
@@ -204,21 +213,60 @@ def main() -> None:
     ap.add_argument("--time-limit", type=float, default=None,
                     help="soft wall-clock limit in seconds per query, including setup")
     ap.add_argument("--limit", type=int, default=None, help="use only the first N queries")
+    ap.add_argument("--query-offset", type=int, default=0, help="skip the first N queries")
+    policy_options = ap.add_mutually_exclusive_group()
+    policy_options.add_argument("--pruning-controller", type=Path, help="trained pruning readout")
+    policy_options.add_argument("--pruning-every", type=int, help="check every N eligible branches")
+    ap.add_argument("--check-unranked", action="store_true",
+                    help="run domains outside the policy's ranking nodes")
     ap.add_argument("--progress", action="store_true", help="show per-query progress (requires tqdm)")
     ap.add_argument("--seed", type=int, default=0)
     args = ap.parse_args()
     if args.prune_after_steps < 0:
         ap.error("--prune-after-steps must be nonnegative")
+    if args.query_offset < 0 or (args.limit is not None and args.limit < 1):
+        ap.error("query offset must be nonnegative and query limit positive")
+    if args.pruning_every is not None and args.pruning_every < 1:
+        ap.error("--pruning-every must be positive")
+    if args.check_unranked and args.pruning_controller is None and args.pruning_every is None:
+        ap.error("--check-unranked requires a pruning policy")
+    if args.pruning_controller is not None or args.pruning_every is not None:
+        if args.method != "neugn" or args.pruning != "domains" or args.checkpoint is None:
+            ap.error("pruning policies require --method neugn --pruning domains --checkpoint PATH")
     if args.time_limit is not None and (not math.isfinite(args.time_limit) or args.time_limit <= 0):
         ap.error("--time-limit must be finite and positive")
 
     g = load(args.graph)
     qpath = Path(args.query_set) if args.query_set else query_set_path(args.graph, args.size, args.density)
     queries, qmeta = load_query_set(qpath)
-    queries = queries[: args.limit]
-    factory = make_hook_factory(args, g)
+    queries = queries[args.query_offset:][:args.limit]
+    if not queries:
+        ap.error("no queries in the selected range")
+    controller = policy_factory = None
+    if args.pruning_controller is not None:
+        from models.pruning_controller import LearnedPruning
 
-    query_iter = enumerate(queries)
+        controller = LearnedPruning(args.pruning_controller, Path(args.checkpoint))
+        def policy_factory(hook, g, q):
+            return controller.for_query(hook, g, q, check_unranked=args.check_unranked)
+    elif args.pruning_every is not None:
+        from models.pruning_controller import eligible
+
+        def policy_factory(hook, g, q):
+            visits = 0
+
+            def periodic(branch):
+                nonlocal visits
+                if not eligible(hook, branch):
+                    return args.check_unranked
+                visits += 1
+                return (visits - 1) % args.pruning_every == 0
+
+            return periodic
+    factory = make_hook_factory(args, g, capture_scores=controller is not None,
+                                capture_state=controller is not None and controller.use_anchor)
+
+    query_iter = enumerate(queries, start=args.query_offset)
     if args.progress:
         try:
             from tqdm import tqdm
@@ -232,7 +280,8 @@ def main() -> None:
     for i, q in query_iter:
         r = run_query(q.graph, g, factory, filter_name=args.filter, order_name=args.order,
                       k=args.k, budget=args.budget, pruning=args.pruning,
-                      prune_after_steps=args.prune_after_steps, time_limit=args.time_limit)
+                      prune_after_steps=args.prune_after_steps, time_limit=args.time_limit,
+                      pruning_policy_factory=policy_factory)
         records.append(dict(query=i, **r))
 
     summary = summarize(records, args.k, args.budget)
@@ -243,9 +292,20 @@ def main() -> None:
             tag += f"_after{args.prune_after_steps}"
     if args.tag:
         tag += f"_{args.tag}"
+    if args.pruning_controller is not None:
+        tag += f"_controller_{args.pruning_controller.stem}"
+    if args.pruning_every is not None:
+        tag += f"_every{args.pruning_every}"
+    if args.check_unranked:
+        tag += "_check_unranked"
+    if args.query_offset:
+        tag += f"_offset{args.query_offset}"
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
     out = RESULTS_DIR / f"{tag}.json"
-    out.write_text(json.dumps(dict(config=vars(args), query_set=qmeta,
+    config = vars(args).copy()
+    if args.pruning_controller is not None:
+        config["pruning_controller"] = str(args.pruning_controller)
+    out.write_text(json.dumps(dict(config=config, query_set=qmeta,
                                    summary=summary, records=records), indent=1))
     print(f"{tag}: solved {summary['solved']}/{summary['queries']}, "
           f"median FMS {fmt(summary['median_fms'])}, "
