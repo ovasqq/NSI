@@ -66,7 +66,11 @@ def run_query(
                      fms_with_probes=total if total is not None and total <= budget else None)
     if res.pruning is not None:
         extra.update(pruning_calls=res.pruning.calls, pruning_seconds=res.pruning.seconds,
-                     motif_checks=res.pruning.motif_checks, pruning_cuts=res.pruning.cuts)
+                     motif_checks=res.pruning.motif_checks, pruning_cuts=res.pruning.cuts,
+                     pruning_stages={
+                         name: dict(calls=stage.calls, seconds=stage.seconds)
+                         for name, stage in res.pruning.stages.items()
+                     })
     return dict(
         n=q.n,
         m=q.m,
@@ -90,8 +94,13 @@ def summarize(records: list[dict], k: int, budget: int) -> dict:
     fms = [r["fms"] for r in records]
     kth = [r["match_steps"][k - 1] if len(r["match_steps"]) >= k else None for r in records]
     cuts: Counter[str] = Counter()
+    stages: dict[str, dict] = {}
     for r in records:
         cuts.update(r.get("pruning_cuts", {}))
+        for name, stage in r.get("pruning_stages", {}).items():
+            total = stages.setdefault(name, dict(calls=0, seconds=0.0))
+            total["calls"] += stage["calls"]
+            total["seconds"] += stage["seconds"]
     return dict(
         queries=len(records),
         solved=sum(v is not None for v in fms),
@@ -108,6 +117,7 @@ def summarize(records: list[dict], k: int, budget: int) -> dict:
             "pruning_seconds": sum(r["pruning_seconds"] for r in records),
             "motif_checks": sum(r["motif_checks"] for r in records),
             "pruning_cuts": dict(cuts)} if records and "pruning_calls" in records[0] else {}),
+        **({"pruning_stages": stages} if stages else {}),
         **({"median_fms_with_probes": censored_median([r["fms_with_probes"] for r in records]),
             "solved_with_probes": sum(r["fms_with_probes"] is not None for r in records)}
            if records and "fms_with_probes" in records[0] else {}),

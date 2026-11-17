@@ -21,6 +21,7 @@
   - `steps`, `complete`;
   - `filter_seconds`, `search_seconds`, `total_seconds` — время подготовки запроса, поиска и их сумма;
   - при `--pruning` в одном из [режимов проверок](../search/README.md#pruningpy--проверки-остаточной-задачи) пишутся `pruning_calls`, `pruning_seconds`, `motif_checks` и `pruning_cuts` по причинам. Внутренняя работа проверок входит во время поиска. Бюджет по-прежнему ограничивает назначения DFS;
+  - `pruning_stages` разбивает проверки по стадиям `build_domains`, `arc_consistency`, `matching` и `motifs`. У каждой указаны `calls` и `seconds` по запросу и суммарно в `summary`. `motifs.calls` считает запуски стадии выбора и проверки мотивов, а `motif_checks` — проверенные мотивы. Общий `pruning_seconds` также включает подготовку проверок и служебную работу каскада.
   - для хуков со спусками: `probe_steps` и `fms_with_probes` = FMS + шаги спусков (`None`, если сумма больше бюджета). Бюджет ограничивает только шаги самого перебора.
 - **`censored_median(values)`** — медиана, где `None` считается +∞. Она точна, пока цензурировано меньше половины запросов; иначе получается ∞ и печатается как «> budget».
 - **`summarize(records, k, budget)`**:

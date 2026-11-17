@@ -179,6 +179,10 @@ def test_empty_and_unsupported_domains(last_domain, reason):
     result = enumerate_matches(q, g, cand, [0, 1, 2], pruning="domains", max_steps=1)
     assert result.complete and result.steps == 1 and result.num_matches == 0
     assert result.pruning.cuts == {reason: 1}
+    stages = result.pruning.stages
+    assert stages["build_domains"].calls == 1
+    assert stages["arc_consistency"].calls == (reason == "arc_consistency")
+    assert stages["matching"].calls == 0
 
 
 def test_matching_detects_conflict_with_nonempty_domains():
@@ -187,8 +191,12 @@ def test_matching_detects_conflict_with_nonempty_domains():
     arc = enumerate_matches(q, g, cand, [0, 1, 2, 3], pruning="arc", max_steps=1)
     result = enumerate_matches(q, g, cand, [0, 1, 2, 3], pruning="domains", max_steps=1)
     assert not arc.complete and not arc.pruning.cuts
+    assert arc.pruning.stages["matching"].calls == 0
     assert result.complete and result.steps == 1 and result.num_matches == 0
     assert result.pruning.cuts == {"all_different": 1}
+    assert result.pruning.stages["matching"].calls == 1
+    assert all(stage.seconds >= 0 for stage in result.pruning.stages.values())
+    assert sum(stage.seconds for stage in result.pruning.stages.values()) <= result.pruning.seconds
 
 
 @pytest.mark.parametrize(("query_cycle", "target_cycle", "reason"), [
@@ -208,4 +216,5 @@ def test_motifs_detect_conflicts_that_domains_miss(query_cycle, target_cycle, re
     assert not domains.complete and domains.steps == 1 and not domains.pruning.cuts
     assert motifs.complete and motifs.steps == 1 and motifs.num_matches == 0
     assert motifs.pruning.motif_checks == 1
+    assert motifs.pruning.stages["motifs"].calls == 1
     assert motifs.pruning.cuts == {reason: 1}

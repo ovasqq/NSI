@@ -18,11 +18,27 @@ MAX_MOTIF_PRODUCT = 4096
 
 
 @dataclass
+class PruningStageStats:
+    calls: int = 0
+    seconds: float = 0.0
+
+
+@dataclass
 class PruningStats:
     calls: int = 0
     seconds: float = 0.0
     motif_checks: int = 0
     cuts: dict[str, int] = field(default_factory=dict)
+    stages: dict[str, PruningStageStats] = field(default_factory=lambda: {
+        name: PruningStageStats()
+        for name in ("build_domains", "arc_consistency", "matching", "motifs")
+    })
+
+    def record_stage(self, name: str, started: float) -> None:
+        elapsed = perf_counter() - started
+        stage = self.stages[name]
+        stage.calls += 1
+        stage.seconds += elapsed
 
 
 class ResidualPruner:
@@ -45,6 +61,35 @@ class ResidualPruner:
         return True
 
     def _conflict(self, depth: int, mapping: list[int], used: set[int]) -> str | None:
+        started = perf_counter()
+        domains = self._build_domains(depth, mapping, used)
+        self.stats.record_stage("build_domains", started)
+        if domains is None:
+            return "empty_domain"
+
+        started = perf_counter()
+        consistent = self._propagate_arcs(domains)
+        self.stats.record_stage("arc_consistency", started)
+        if not consistent:
+            return "arc_consistency"
+
+        if self.use_matching:
+            started = perf_counter()
+            covered = _covers_all(domains)
+            self.stats.record_stage("matching", started)
+            if not covered:
+                return "all_different"
+
+        if self.motifs:
+            started = perf_counter()
+            reason = self._check_motifs(domains)
+            self.stats.record_stage("motifs", started)
+            return reason
+        return None
+
+    def _build_domains(
+        self, depth: int, mapping: list[int], used: set[int]
+    ) -> dict[int, frozenset[int]] | None:
         space = self.space
         g_adj = space.g.adj_set
         q_adj = space.q.adj_set
@@ -53,10 +98,14 @@ class ResidualPruner:
             mapped_neighbours = [g_adj[mapping[w]] for w in q_adj[u] if mapping[w] != -1]
             candidates = space.cand_set[u].intersection(*mapped_neighbours).difference(used)
             if not candidates:
-                return "empty_domain"
+                return None
             domains[u] = candidates
+        return domains
 
+    def _propagate_arcs(self, domains: dict[int, frozenset[int]]) -> bool:
         # AC-3: a candidate must have at least one support across every query edge.
+        g_adj = self.space.g.adj_set
+        q_adj = self.space.q.adj_set
         arcs = deque((u, w) for u in domains for w in q_adj[u] if w in domains)
         while arcs:
             u, w = arcs.popleft()
@@ -64,14 +113,13 @@ class ResidualPruner:
             support = domains[w]
             revised = frozenset(v for v in old if not g_adj[v].isdisjoint(support))
             if not revised:
-                return "arc_consistency"
+                return False
             if len(revised) < len(old):
                 domains[u] = revised
                 arcs.extend((other, u) for other in q_adj[u] if other != w and other in domains)
+        return True
 
-        if self.use_matching and not _covers_all(domains):
-            return "all_different"
-
+    def _check_motifs(self, domains: dict[int, frozenset[int]]) -> str | None:
         # Try the smallest domain product for each motif size. The domains used
         # here are the reduced domains of this branch only.
         for group in self.motifs:
