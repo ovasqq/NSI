@@ -24,7 +24,7 @@ from typing import Callable, Sequence
 import numpy as np
 
 from search.graph import Graph
-from search.pruning import PRUNING_MODES, DeepPruning, PruningStats, ResidualPruner
+from search.pruning import PRUNING_MODES, DeepPruning, FragmentSelector, PruningStats, ResidualPruner
 
 # hook(depth, u, mapping, candidates) -> permutation of candidates.
 # `mapping[w]` is the image of query vertex w, or -1 if w is not mapped yet.
@@ -144,6 +144,9 @@ def enumerate_space(
     branch_observer: BranchObserver | None = None,
     before_check: BranchVisitor | None = None,
     prefix: Sequence[int] = (),
+    fragment: FragmentSelector | None = None,
+    fragment_budget: int = 0,
+    fragment_depth: int = 10,
 ) -> SearchResult:
     """Skip pruning for the first prune_after_steps attempts. The optional
     deadline uses perf_counter(). A prefix contains already assigned data
@@ -156,6 +159,8 @@ def enumerate_space(
         raise ValueError("a pruning policy requires an exact pruning mode")
     if deep_pruning is not None and pruning != "domains":
         raise ValueError("deep pruning overrides require domains as the base mode")
+    if fragment is not None and (pruning != "forward" or fragment_budget < 1 or fragment_depth < 1):
+        raise ValueError("fragment checks require forward pruning and positive budget and ranking depth")
     n = space.q.n
     order = space.order
     if len(prefix) >= n and prefix:
@@ -216,7 +221,10 @@ def enumerate_space(
                     if deadline is not None:
                         check_deadline(deadline)
                 if should_check:
-                    rejected = pruner.rejects(i + 1, mapping, used)
+                    if fragment is not None and len(local) > 1 and i < fragment_depth and i + 2 < n:
+                        rejected = pruner.rejects(i + 1, mapping, used, fragment, fragment_budget)
+                    else:
+                        rejected = pruner.rejects(i + 1, mapping, used)
                     if deadline is not None:
                         check_deadline(deadline)
                 if not rejected:

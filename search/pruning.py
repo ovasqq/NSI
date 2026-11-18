@@ -17,6 +17,7 @@ DEEP_MODES = ("none", "forward", "matching", "matching_arc", "adaptive")
 Domains = dict[int, frozenset[int]]
 ArcPolicy = Callable[[int, Domains], bool]
 StateArcPolicy = Callable[[int, Domains, list[int]], bool]
+FragmentSelector = Callable[[int, Domains, list[int]], tuple[int, ...]]
 # Limit the Cartesian product of a motif's domains before attempting its search.
 MAX_MOTIF_PRODUCT = 4096
 
@@ -58,7 +59,9 @@ class PruningStats:
 
     def record_stage(self, name: str, started: float) -> None:
         elapsed = perf_counter() - started
-        stage = self.stages[name]
+        stage = self.stages.get(name)
+        if stage is None:
+            stage = self.stages[name] = PruningStageStats()
         stage.calls += 1
         stage.seconds += elapsed
 
@@ -84,12 +87,13 @@ class ResidualPruner:
         self.motifs = self._find_motifs() if mode == "motifs" else ()
         self.stats.seconds = perf_counter() - started
 
-    def rejects(self, depth: int, mapping: list[int], used: set[int]) -> bool:
+    def rejects(self, depth: int, mapping: list[int], used: set[int],
+                fragment: FragmentSelector | None = None, fragment_budget: int = 0) -> bool:
         mode = self.deep.mode if self.deep is not None and depth > self.deep.full_depth else None
         if mode == "none":
             return False
         started = perf_counter()
-        reason = self._conflict(depth, mapping, used, mode)
+        reason = self._conflict(depth, mapping, used, mode, fragment, fragment_budget)
         self.stats.calls += 1
         self.stats.seconds += perf_counter() - started
         if reason is None:
@@ -97,12 +101,27 @@ class ResidualPruner:
         self.stats.cuts[reason] = self.stats.cuts.get(reason, 0) + 1
         return True
 
-    def _conflict(self, depth: int, mapping: list[int], used: set[int], mode: str | None) -> str | None:
+    def _conflict(self, depth: int, mapping: list[int], used: set[int], mode: str | None,
+                  fragment: FragmentSelector | None, fragment_budget: int) -> str | None:
         started = perf_counter()
         domains = self.build_domains(depth, mapping, used)
         self.stats.record_stage("build_domains", started)
         if domains is None:
             return "empty_domain"
+
+        if fragment is not None:
+            started = perf_counter()
+            vertices = fragment(depth, domains, mapping)
+            self.stats.record_stage("fragment_select", started)
+            if vertices:
+                started = perf_counter()
+                outcome = check_fragment(self.space, domains, vertices, fragment_budget)
+                self.stats.record_stage("fragment_check", started)
+                if outcome is False:
+                    return "fragment"
+                if outcome is None:
+                    stage = self.stats.stages.setdefault("fragment_exhausted", PruningStageStats())
+                    stage.calls += 1
 
         if mode == "forward":
             return None
@@ -240,6 +259,40 @@ class ResidualPruner:
             return False
 
         return visit(0)
+
+
+def check_fragment(space: SearchSpace, domains: Domains, vertices: tuple[int, ...],
+                   budget: int) -> bool | None:
+    """Find a non-induced embedding, exhaust all choices, or return unknown.
+
+    Each candidate inspection costs one unit, including rejected candidates.
+    Iterating the original domains keeps even unsuccessful work bounded.
+    """
+    if not 2 <= len(vertices) <= 4 or len(set(vertices)) != len(vertices):
+        raise ValueError("expected 2–4 distinct residual vertices")
+    order = sorted(vertices, key=lambda u: (len(domains[u]), u))
+    earlier = [[j for j, w in enumerate(order[:i]) if w in space.q.adj_set[u]]
+               for i, u in enumerate(order)]
+    images = []
+
+    def visit(i: int) -> bool | None:
+        nonlocal budget
+        if i == len(order):
+            return True
+        for v in domains[order[i]]:
+            if budget <= 0:
+                return None
+            budget -= 1
+            if v in images or any(images[j] not in space.g.adj_set[v] for j in earlier[i]):
+                continue
+            images.append(v)
+            outcome = visit(i + 1)
+            images.pop()
+            if outcome is not False:
+                return outcome
+        return False
+
+    return visit(0)
 
 
 def _covers_all(domains: dict[int, frozenset[int]]) -> bool:
