@@ -102,3 +102,21 @@ def test_joint_search_preserves_embeddings_with_active_checks():
     assert set(result.embeddings) == set(expected.embeddings)
     assert session.metrics["checks"] > 0
     assert session.metrics["transformer_calls"] > 0
+
+
+def test_from_scratch_does_not_copy_teacher_parameters():
+    teacher = NeuGN(NeuGNConfig(5, 1, d=8, heads=2, ffn=16, layers=1))
+    with torch.no_grad():
+        for parameter in teacher.parameters():
+            parameter.fill_(17)
+    student = PairTransformer(teacher, from_scratch=True)
+    assert not torch.equal(student.neugn.content_emb.weight, teacher.content_emb.weight)
+    assert not torch.equal(
+        student.neugn.encoder.layers[0].linear1.weight,
+        teacher.encoder.layers[0].linear1.weight,
+    )
+    _, row = example()
+    ranks, scores = student(row)
+    (ranks.square().mean() + scores.square().mean()).backward()
+    assert student.neugn.content_emb.weight.grad is not None
+    assert all(parameter.grad is None for parameter in teacher.parameters())

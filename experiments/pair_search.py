@@ -306,6 +306,11 @@ def main():
     p.add_argument("--checkpoint", type=Path, required=True)
     p.add_argument("--output", type=Path, required=True)
     p.add_argument("--device", default="cpu")
+    p.add_argument(
+        "--from-scratch",
+        action="store_true",
+        help="randomly initialize the residual Transformer, embeddings and heads; use the checkpoint as teacher",
+    )
     p.add_argument("--phase", choices=("all", "train", "test"), default="all")
     p.add_argument("--sizes", nargs="+", type=int, default=[10, 16, 24, 32])
     for name, value in (
@@ -342,7 +347,7 @@ def main():
                 (
                     v
                     for k, v in vars(args).items()
-                    if isinstance(v, (int, float)) and k != "seed"
+                    if type(v) in (int, float) and k != "seed"
                 )
             )
             <= 0
@@ -369,7 +374,11 @@ def main():
     if backbone.cfg.num_g != g.n or backbone.cfg.num_labels <= int(g.labels.max()):
         p.error("checkpoint incompatible with graph")
     sets = load_splits(g, args)
-    model = PairTransformer(backbone).to(args.device).requires_grad_(True)
+    model = (
+        PairTransformer(backbone, from_scratch=args.from_scratch)
+        .to(args.device)
+        .requires_grad_(True)
+    )
     path = args.output / "pair_transformer.pt"
     if args.phase == "test":
         saved = torch.load(path, map_location=args.device, weights_only=True)

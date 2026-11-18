@@ -7,6 +7,7 @@ from torch import nn
 
 from models.encoding import collate, encode_state
 from models.fragment import encode as sample_domains
+from models.neugn import NeuGN
 from models.residual_arc import ResidualArcHead
 
 
@@ -58,9 +59,9 @@ def encode_pairs(space, qenc, mapping, domains, options, candidates, max_pairs):
 
 
 class PairTransformer(nn.Module):
-    def __init__(self, backbone):
+    def __init__(self, backbone, *, from_scratch=False):
         super().__init__()
-        self.neugn = deepcopy(backbone)
+        self.neugn = NeuGN(backbone.cfg) if from_scratch else deepcopy(backbone)
         d = backbone.cfg.d
         self.check = nn.Parameter(torch.zeros(d))
         self.types = nn.Embedding(2, d)
