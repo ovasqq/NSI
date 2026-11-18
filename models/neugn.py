@@ -42,14 +42,17 @@ class QSExtractor(nn.Module):
         self.label_emb = nn.Embedding(cfg.num_labels, cfg.d)
         self.layers = nn.ModuleList(nn.Linear(cfg.d, cfg.d) for _ in range(cfg.gcn_layers))
 
-    def forward(self, q_labels, q_adj, q_mask):
+    def vertices(self, q_labels, q_adj):
         h = self.label_emb(q_labels)  # (B, n, d)
         for i, lin in enumerate(self.layers):
             h = q_adj @ lin(h)
             if i + 1 < len(self.layers):
                 h = torch.relu(h)
-        h = h.masked_fill(~q_mask[..., None], float("-inf"))
-        return h.max(dim=1).values  # (B, d)
+        return h
+
+    def forward(self, q_labels, q_adj, q_mask):
+        h = self.vertices(q_labels, q_adj)
+        return h.masked_fill(~q_mask[..., None], float("-inf")).max(dim=1).values
 
 
 class NeuGN(nn.Module):
@@ -101,9 +104,7 @@ class NeuGN(nn.Module):
         if h_q is None:
             h_q = self.query_vector(batch)
 
-        tok = self.content_emb(content) + self.qvert_emb(batch["qvert"])
-        if self.label_emb is not None:
-            tok = tok + self.label_emb(batch["tok_label"])
+        tok = self.mapping_tokens(batch)
         x = torch.cat([h_q[:, None], self.anchor.expand(b, 1, -1), tok], dim=1)
         x = x + self.pos_emb(torch.arange(L + 2, device=x.device))[None]
         x = self.norm_in(x)
@@ -113,3 +114,9 @@ class NeuGN(nn.Module):
         )
         x = self.encoder(x, src_key_padding_mask=~keep)
         return x[:, 1]
+
+    def mapping_tokens(self, batch) -> torch.Tensor:
+        tok = self.content_emb(batch["content"]) + self.qvert_emb(batch["qvert"])
+        if self.label_emb is not None:
+            tok = tok + self.label_emb(batch["tok_label"])
+        return tok

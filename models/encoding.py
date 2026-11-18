@@ -54,14 +54,15 @@ def encode_query(q: Graph, seq: list[int], cand_count: np.ndarray | None = None)
 
 
 def encode_state(
-    qenc: dict, mapping: list[int], target: int, shift: int, num_g: int
+    qenc: dict, mapping: list[int], target: int | None, shift: int, num_g: int
 ) -> dict:
     """`mapping[w]` = image of query vertex w or -1; `target` is a query vertex
-    (its own mapping entry is ignored)."""
+    (its own mapping entry is ignored). With no target, preserve every assignment."""
     seq = qenc["seq"]
     m = np.asarray(mapping, dtype=np.int64)
     content = np.where(m[seq] >= 0, m[seq], pad_id(num_g))
-    content[seq == target] = cls_id(num_g)
+    if target is not None:
+        content[seq == target] = cls_id(num_g)
     state = dict(
         qenc,
         content=content,

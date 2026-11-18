@@ -16,6 +16,7 @@ PRUNING_MODES = ("none", "forward", "matching", "arc", "domains", "motifs")
 DEEP_MODES = ("none", "forward", "matching", "matching_arc", "adaptive")
 Domains = dict[int, frozenset[int]]
 ArcPolicy = Callable[[int, Domains], bool]
+StateArcPolicy = Callable[[int, Domains, list[int]], bool]
 # Limit the Cartesian product of a motif's domains before attempting its search.
 MAX_MOTIF_PRODUCT = 4096
 
@@ -27,12 +28,14 @@ class DeepPruning:
     full_depth: int
     mode: str
     arc_policy_factory: Callable[[SearchSpace], ArcPolicy] | None = None
+    state_arc_policy_factory: Callable[[SearchSpace], StateArcPolicy] | None = None
 
     def __post_init__(self):
         if self.full_depth < 0 or self.mode not in DEEP_MODES:
             raise ValueError("invalid deep pruning configuration")
-        if (self.mode == "adaptive") != (self.arc_policy_factory is not None):
-            raise ValueError("only adaptive deep pruning requires an AC-3 policy")
+        policies = int(self.arc_policy_factory is not None) + int(self.state_arc_policy_factory is not None)
+        if policies != int(self.mode == "adaptive"):
+            raise ValueError("adaptive deep pruning requires exactly one AC-3 policy")
 
 
 @dataclass
@@ -69,8 +72,12 @@ class ResidualPruner:
         self.deep = deep
         self.stats = PruningStats()
         self.arc_policy = None
+        self.state_arc_policy = None
         if deep is not None and deep.arc_policy_factory is not None:
             self.arc_policy = deep.arc_policy_factory(space)
+        if deep is not None and deep.state_arc_policy_factory is not None:
+            self.state_arc_policy = deep.state_arc_policy_factory(space)
+        if self.arc_policy is not None or self.state_arc_policy is not None:
             self.stats.stages["arc_policy"] = PruningStageStats()
         self.use_arc = mode in ("arc", "domains", "motifs")
         self.use_matching = mode in ("matching", "domains", "motifs")
@@ -106,7 +113,8 @@ class ResidualPruner:
                 return self.extra_arc_conflict(domains)
             if mode == "adaptive":
                 started = perf_counter()
-                check = self.arc_policy(depth, domains)
+                check = (self.state_arc_policy(depth, domains, mapping) if self.state_arc_policy is not None
+                         else self.arc_policy(depth, domains))
                 self.stats.record_stage("arc_policy", started)
                 if check:
                     self.stats.arc_policy_checks += 1

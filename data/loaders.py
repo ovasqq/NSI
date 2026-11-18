@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import io
+import json
 import shutil
 import subprocess
 import tarfile
@@ -19,6 +20,8 @@ RAW_DIR = Path(__file__).resolve().parent / "raw"
 
 HAMSTER_URL = "http://konect.cc/files/download.tsv.petster-hamster.tar.bz2"
 LASTFM_URL = "https://snap.stanford.edu/data/lastfm_asia.zip"
+
+WIKICS_URL = "https://raw.githubusercontent.com/pmernyei/wiki-cs-dataset/master/dataset/data.json"
 
 
 def _download(url: str, name: str) -> Path:
@@ -84,6 +87,16 @@ def load_lastfm() -> Graph:
     return Graph.from_edges(n, ((int(a), int(b)) for a, b in edges_rows), labels)
 
 
+def load_wikics() -> Graph:
+    """WikiCS hyperlinks and subject labels as a simple undirected graph."""
+    path = _download(WIKICS_URL, "wikics.json")
+    with path.open() as stream:
+        data = json.load(stream)
+    labels = data["labels"]
+    edges = ((u, v) for u, neighbors in enumerate(data["links"]) for v in neighbors)
+    return Graph.from_edges(len(labels), edges, labels)
+
+
 def load_rewired() -> Graph:
     """Synthetic transfer target: Hamster with the same vertices, labels and
     degrees, but the giant component's edges randomized (connected double-edge
@@ -104,7 +117,8 @@ def load_rewired() -> Graph:
     return Graph.from_edges(base.n, new_edges, base.labels)
 
 
-LOADERS = {"hamster": load_hamster, "lastfm": load_lastfm, "rewired": load_rewired}
+LOADERS = {"hamster": load_hamster, "lastfm": load_lastfm, "rewired": load_rewired,
+           "wikics": load_wikics}
 
 
 def load(name: str) -> Graph:
