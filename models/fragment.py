@@ -49,7 +49,8 @@ def manual_fragment(space: SearchSpace, domains: Domains, options: list[tuple[in
 
 
 def encode(space: SearchSpace, domains: Domains, depth: int, mapping: list[int],
-           limit: int, options: list[tuple[int, ...]], anchor: torch.Tensor):
+           limit: int, options: list[tuple[int, ...]], anchor: torch.Tensor,
+           *, include_data_edges: bool = True):
     """Sample bounded domain neighborhoods. Shared candidate IDs are shared nodes."""
     q, g = space.q, space.g
     vertices = list(domains)
@@ -101,14 +102,15 @@ def encode(space: SearchSpace, domains: Domains, depth: int, mapping: list[int],
     index = {v: i for i, v in enumerate(ids)}
     n, m = len(vertices), len(ids)
     ownership = torch.zeros((n, m), dtype=torch.bool)
-    data_edges = torch.zeros((m, m), dtype=torch.bool)
+    data_edges = torch.zeros((m, m) if include_data_edges else (0, 0), dtype=torch.bool)
     query_edges = torch.zeros((n, n), dtype=torch.bool)
     query_index = {x: i for i, x in enumerate(vertices)}
     for i, x in enumerate(vertices):
         ownership[i, [index[v] for v in domains[x] & ids_set]] = True
         query_edges[i, [query_index[y] for y in q.adj_set[x] if y in query_index]] = True
-    for i, v in enumerate(ids):
-        data_edges[i, [index[w] for w in g.adj_set[v] & ids_set]] = True
+    if include_data_edges:
+        for i, v in enumerate(ids):
+            data_edges[i, [index[w] for w in g.adj_set[v] & ids_set]] = True
     actions = torch.zeros((len(options), n), dtype=torch.bool)
     for i, fragment in enumerate(options):
         actions[i, [query_index[x] for x in fragment]] = True

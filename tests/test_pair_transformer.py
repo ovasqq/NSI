@@ -154,3 +154,32 @@ def test_online_stream_generates_new_states_each_epoch():
     )
     args.states_per_epoch = 0
     assert PairStateStream.epoch_size(graph, args) == 8
+
+
+def test_batched_padding_and_cached_relations_match_single_state():
+    space, row = example()
+    teacher = NeuGN(NeuGNConfig(5, 1, d=8, heads=2, ffn=16, layers=1)).eval()
+    model = PairTransformer(teacher).eval()
+    shorter = encode_pairs(
+        space,
+        encode_query(space.q, euler_sequence(space.q)),
+        [0, 1, -1, -1],
+        {2: frozenset({2, 3}), 3: frozenset({2})},
+        [(2, 3)],
+        2,
+        4,
+    )
+    expected_rank, expected_scores = model(shorter)
+    ranks, scores = model.forward_batch([row, shorter])
+    torch.testing.assert_close(ranks[1], expected_rank)
+    torch.testing.assert_close(scores[1], expected_scores)
+    original_rank, original_scores = model(row)
+    assert model.cache_graph(space.g)
+    row["relations"] = None
+    cached_rank, cached_scores = model(row)
+    torch.testing.assert_close(cached_rank, original_rank)
+    torch.testing.assert_close(cached_scores, original_scores)
+    model.train()
+    rank, scores = model.forward_batch([row, shorter])
+    (rank.square().mean() + sum(score.square().mean() for score in scores)).backward()
+    assert model.relations.grad is not None
