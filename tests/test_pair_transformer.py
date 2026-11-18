@@ -120,3 +120,37 @@ def test_from_scratch_does_not_copy_teacher_parameters():
     (ranks.square().mean() + scores.square().mean()).backward()
     assert student.neugn.content_emb.weight.grad is not None
     assert all(parameter.grad is None for parameter in teacher.parameters())
+
+
+def test_online_stream_generates_new_states_each_epoch():
+    from train.pair_stream import PairStateStream
+
+    graph = Graph.from_edges(8, [(i, (i + 1) % 8) for i in range(8)], [0] * 8)
+    teacher = NeuGN(NeuGNConfig(8, 1, d=8, heads=2, ffn=16, layers=1)).eval()
+    args = SimpleNamespace(
+        depth=2,
+        sizes=[6],
+        states_per_epoch=3,
+        reference_batch=4,
+        epochs=2,
+        seed=0,
+        device="cpu",
+        candidates=2,
+        max_pairs=8,
+        proposals=3,
+        fragment_budget=32,
+        budget=1000,
+        horizon_ms=1.0,
+    )
+    stream = PairStateStream(graph, teacher, {}, args)
+    first, second = list(stream.epoch(0)), list(stream.epoch(1))
+    assert len(first) == len(second) == 3
+    assert all(row["local"] for row in first + second)
+    assert all(len(row["owners"]) <= args.max_pairs for row in first + second)
+    assert any(
+        not torch.equal(a["pair_ids"], b["pair_ids"])
+        or not torch.equal(a["state"]["content"], b["state"]["content"])
+        for a, b in zip(first, second)
+    )
+    args.states_per_epoch = 0
+    assert PairStateStream.epoch_size(graph, args) == 8

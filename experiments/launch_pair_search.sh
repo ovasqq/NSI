@@ -5,7 +5,7 @@ cd "$(dirname "$0")/.."
 PYTHON="${PYTHON:-.venv-gpu/bin/python}"
 GPU="${GPU:-4}"
 SOURCE_RUN="${SOURCE_RUN:-/raid/ovasqq/neugn-runs/wikics_deep_ac3_20261118_140911}"
-TAG="${TAG:-wikics_pair_$(date +%Y%m%d_%H%M%S)}"
+TAG="${TAG:-wikics_pair_scratch1000_$(date +%Y%m%d_%H%M%S)}"
 OUT="/raid/ovasqq/neugn-runs/$TAG"
 
 if [[ -z "${CHECKPOINT:-}" ]]; then
@@ -40,5 +40,6 @@ export OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1
   "$PYTHON" -c 'import torch; assert torch.cuda.is_available(); print(torch.cuda.get_device_name(0))'
   "$PYTHON" -u -m experiments.pair_search \
     --graph wikics --checkpoint "$CHECKPOINT" --device cuda:0 \
-    --output "$OUT" --sizes 10 16 24 32 --epochs 10 --repeats 3 "$@"
+    --output "$OUT" --sizes 10 16 24 32 \
+    --from-scratch --online-states --epochs 1000 --lr 0.0003 --repeats 3 "$@"
 ) 2>&1 | tee "$OUT/run.log"

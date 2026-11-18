@@ -2,6 +2,7 @@
 
 import argparse
 import csv
+import json
 import math
 from pathlib import Path
 from time import perf_counter
@@ -139,6 +140,57 @@ def run(query, g, backbone, model, args, mode, threshold):
     )
 
 
+def label_state(space, hook, mapping, domains, prefix, remaining, args):
+    stats = {"censored": 0}
+    depth = len(prefix)
+    options = proposals(space, domains, args.proposals)
+    row = encode_pairs(
+        space,
+        hook.qenc,
+        mapping,
+        domains,
+        options,
+        args.candidates,
+        args.max_pairs,
+    )
+    if not row["local"]:
+        return None, 0
+    times, refuted = ([], [])
+    for option in options:
+        start = perf_counter()
+        outcome = check_fragment(space, domains, option, args.fragment_budget)
+        times.append((perf_counter() - start) * 1000)
+        refuted.append(outcome is False)
+    continuation = 0.0
+    if any(refuted):
+        start = perf_counter()
+        replay = enumerate_space(
+            space,
+            hook,
+            pruning="forward",
+            prefix=prefix,
+            max_steps=remaining,
+            max_matches=1,
+            deadline=start + args.horizon_ms / 1000,
+        )
+        continuation = min((perf_counter() - start) * 1000, args.horizon_ms)
+        stats["censored"] += int(not replay.complete)
+        if replay.num_matches:
+            raise RuntimeError("unsound local contradiction")
+    gains = torch.tensor(
+        np.asarray(refuted) * continuation - np.asarray(times),
+        dtype=torch.float32,
+    )
+    # scores() uses the pretrained model even beyond the early
+    # inference depth limit, providing a distillation target.
+    teacher = hook.scores(mapping, space.order[depth], row["local"])
+    row.update(
+        gains=gains,
+        teacher=teacher,
+    )
+    return row, stats["censored"]
+
+
 def collect(sets, g, backbone, args):
     rng = np.random.default_rng(args.seed)
     rows = []
@@ -187,56 +239,14 @@ def collect(sets, g, backbone, args):
                 domains = pruner.build_domains(depth, mapping, set(prefix))
                 if domains is None:
                     continue
-                options = proposals(space, domains, args.proposals)
-                row = encode_pairs(
-                    space,
-                    hook.qenc,
-                    mapping,
-                    domains,
-                    options,
-                    args.candidates,
-                    args.max_pairs,
+                row, censored = label_state(
+                    space, hook, mapping, domains, prefix, remaining, args
                 )
-                if not row["local"]:
+                stats["censored"] += censored
+                if row is None:
                     continue
-                times, refuted = ([], [])
-                for option in options:
-                    start = perf_counter()
-                    outcome = check_fragment(
-                        space, domains, option, args.fragment_budget
-                    )
-                    times.append((perf_counter() - start) * 1000)
-                    refuted.append(outcome is False)
-                continuation = 0.0
-                if any(refuted):
-                    start = perf_counter()
-                    replay = enumerate_space(
-                        space,
-                        hook,
-                        pruning="forward",
-                        prefix=prefix,
-                        max_steps=remaining,
-                        max_matches=1,
-                        deadline=start + args.horizon_ms / 1000,
-                    )
-                    continuation = min((perf_counter() - start) * 1000, args.horizon_ms)
-                    stats["censored"] += int(not replay.complete)
-                    if replay.num_matches:
-                        raise RuntimeError("unsound local contradiction")
-                gains = torch.tensor(
-                    np.asarray(refuted) * continuation - np.asarray(times),
-                    dtype=torch.float32,
-                )
-                # scores() uses the pretrained model even beyond the early
-                # inference depth limit, providing a distillation target.
-                teacher = hook.scores(mapping, space.order[depth], row["local"])
-                row.update(
-                    gains=gains,
-                    teacher=teacher,
-                    query_id=query_id,
-                    size=size,
-                    density=density,
-                )
+                row.update(query_id=query_id, size=size, density=density)
+                gains = row["gains"]
                 rows.append(row)
                 stats["states"] += 1
                 stats["profitable"] += int(bool(len(gains)) and gains.max().item() > 0)
@@ -255,12 +265,26 @@ def fit(model, rows, args):
     model.train()
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
     rng = np.random.default_rng(args.seed)
-    for epoch in range(args.epochs):
+    start_epoch = 0
+    progress = args.output / "training_progress.pt"
+    if args.resume:
+        saved = torch.load(progress, map_location=args.device, weights_only=True)
+        if saved["protocol"] != args.training_protocol:
+            raise ValueError("resume protocol differs from the saved training run")
+        model.load_state_dict(saved["model"])
+        optimizer.load_state_dict(saved["optimizer"])
+        start_epoch = saved["epoch"] + 1
+    for epoch in range(start_epoch, args.epochs):
+        torch.manual_seed(args.seed + epoch)
+        started = perf_counter()
         total = 0.0
         optimizer.zero_grad()
-        indices = rng.permutation(len(rows))
-        for step, i in enumerate(indices):
-            row = rows[i]
+        epoch_rows = (
+            rows.epoch(epoch)
+            if hasattr(rows, "epoch")
+            else (rows[i] for i in rng.permutation(len(rows)))
+        )
+        for step, row in enumerate(epoch_rows):
             ranks, scores = model(row)
             local = torch.tensor(row["local"], device=args.device)
             teacher = row["teacher"].to(args.device)
@@ -269,6 +293,10 @@ def fit(model, rows, args):
                 F.softmax(teacher, dim=-1),
                 reduction="sum",
             )
+            if "target_image" in row:
+                loss = loss + F.cross_entropy(
+                    ranks[None], torch.tensor([row["target_image"]], device=args.device)
+                )
             if len(scores):
                 gains = row["gains"].to(args.device)
                 targets = gains.sign() * gains.abs().log1p()
@@ -294,9 +322,30 @@ def fit(model, rows, args):
                 optimizer.step()
                 optimizer.zero_grad()
             total += loss.item()
-        print(
-            f"Epoch {epoch + 1}/{args.epochs}: loss {total / len(rows):.5f}", flush=True
+            if (step + 1) % 1024 == 0:
+                print(f"Epoch {epoch + 1}: {step + 1}/{len(rows)} states", flush=True)
+        record = dict(
+            epoch=epoch + 1,
+            states=len(rows),
+            loss=total / len(rows),
+            seconds=perf_counter() - started,
         )
+        if hasattr(rows, "last_epoch_stats"):
+            record.update(rows.last_epoch_stats)
+        with (args.output / "training.jsonl").open("a") as log:
+            log.write(json.dumps(record) + "\n")
+        temporary = progress.with_suffix(".tmp")
+        torch.save(
+            dict(
+                epoch=epoch,
+                protocol=args.training_protocol,
+                model=model.state_dict(),
+                optimizer=optimizer.state_dict(),
+            ),
+            temporary,
+        )
+        temporary.replace(progress)
+        print(f"Epoch {epoch + 1}/{args.epochs}: {record}", flush=True)
     return model.eval()
 
 
@@ -306,6 +355,20 @@ def main():
     p.add_argument("--checkpoint", type=Path, required=True)
     p.add_argument("--output", type=Path, required=True)
     p.add_argument("--device", default="cpu")
+    p.add_argument(
+        "--online-states",
+        action="store_true",
+        help="generate fresh random-walk queries and residual states every epoch",
+    )
+    p.add_argument("--resume", action="store_true", help="resume training_progress.pt")
+    p.add_argument(
+        "--states-per-epoch",
+        type=int,
+        default=0,
+        help="0 matches the ordinary NeuGN batch-rounded epoch size",
+    )
+    p.add_argument("--reference-batch", type=int, default=128)
+
     p.add_argument(
         "--from-scratch",
         action="store_true",
@@ -340,6 +403,7 @@ def main():
     args = p.parse_args()
     if (
         args.seed < 0
+        or args.states_per_epoch < 0
         or min(args.sizes) < 3
         or len(set(args.sizes)) != len(args.sizes)
         or (
@@ -347,7 +411,7 @@ def main():
                 (
                     v
                     for k, v in vars(args).items()
-                    if type(v) in (int, float) and k != "seed"
+                    if type(v) in (int, float) and k not in ("seed", "states_per_epoch")
                 )
             )
             <= 0
@@ -366,7 +430,7 @@ def main():
     protocol = {
         k: v
         for k, v in vars(args).items()
-        if k not in ("output", "checkpoint", "phase", "repeats")
+        if k not in ("output", "checkpoint", "phase", "repeats", "resume")
     }
     protocol["checkpoint_digest"] = checkpoint_digest(args.checkpoint)
     backbone = load_model(args.checkpoint, args.device).eval().requires_grad_(False)
@@ -379,6 +443,10 @@ def main():
         .to(args.device)
         .requires_grad_(True)
     )
+    if args.online_states:
+        from train.pair_stream import PairStateStream
+
+        protocol["resolved_states_per_epoch"] = PairStateStream.epoch_size(g, args)
     path = args.output / "pair_transformer.pt"
     if args.phase == "test":
         saved = torch.load(path, map_location=args.device, weights_only=True)
@@ -388,8 +456,18 @@ def main():
         threshold = saved["threshold"]
     else:
         start = perf_counter()
-        rows = collect(sets, g, backbone, args)
-        timings = dict(collection_seconds=perf_counter() - start)
+        if args.online_states:
+            from train.pair_stream import PairStateStream
+
+            rows = PairStateStream(g, backbone, sets, args)
+            protocol["resolved_states_per_epoch"] = len(rows)
+        else:
+            rows = collect(sets, g, backbone, args)
+        args.training_protocol = protocol
+        timing_key = (
+            "stream_setup_seconds" if args.online_states else "collection_seconds"
+        )
+        timings = {timing_key: perf_counter() - start}
         start = perf_counter()
         fit(model, rows, args)
         timings["training_seconds"] = perf_counter() - start
