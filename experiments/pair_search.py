@@ -5,12 +5,13 @@ import csv
 import json
 import math
 from itertools import islice
-from models.encoding import collate
+from models.pair_batch import collate_pairs
+from train.pair_loss import pair_loss
+from train.stage_timer import StageTimer
 from pathlib import Path
 from time import perf_counter
 import numpy as np
 import torch
-from torch.nn import functional as F
 from data.loaders import LOADERS, load
 from experiments.deep_pruning import load_splits, write_json
 from experiments.fms import summarize
@@ -148,7 +149,9 @@ def label_state(
 ):
     stats = {"censored": 0}
     depth = len(prefix)
+    measured = perf_counter()
     options = proposals(space, domains, args.proposals)
+    proposed = perf_counter()
     row = encode_pairs(
         space,
         hook.qenc,
@@ -159,6 +162,7 @@ def label_state(
         args.max_pairs,
         relations_on_device=getattr(args, "relations_on_device", False),
     )
+    encoded = perf_counter()
     if not row["local"]:
         return None, 0
     times, refuted = ([], [])
@@ -167,6 +171,7 @@ def label_state(
         outcome = check_fragment(space, domains, option, args.fragment_budget)
         times.append((perf_counter() - start) * 1000)
         refuted.append(outcome is False)
+    checked = perf_counter()
     continuation = 0.0
     if any(refuted):
         start = perf_counter()
@@ -183,6 +188,7 @@ def label_state(
         stats["censored"] += int(not replay.complete)
         if replay.num_matches:
             raise RuntimeError("unsound local contradiction")
+    continued = perf_counter()
     gains = torch.tensor(
         np.asarray(refuted) * continuation - np.asarray(times),
         dtype=torch.float32,
@@ -190,6 +196,12 @@ def label_state(
     # scores() uses the pretrained model even beyond the early
     # inference depth limit, providing a distillation target.
     row["gains"] = gains
+    row["label_stage_seconds"] = dict(
+        proposals=proposed - measured,
+        encoding=encoded - proposed,
+        exact_checks=checked - encoded,
+        continuation=continued - checked,
+    )
     if teacher_scores:
         row["teacher"] = hook.scores(mapping, space.order[depth], row["local"])
     return row, stats["censored"]
@@ -274,8 +286,16 @@ def fit(model, rows, args, teacher_model=None):
     if args.resume:
         saved = torch.load(progress, map_location=args.device, weights_only=True)
         # Gradient accumulation may change with the physical batch size.
-        previous = {k: v for k, v in saved["protocol"].items() if k != "accumulate"}
-        current = {k: v for k, v in args.training_protocol.items() if k != "accumulate"}
+        previous = {
+            k: v
+            for k, v in saved["protocol"].items()
+            if k not in ("accumulate", "profile_training", "epochs")
+        }
+        current = {
+            k: v
+            for k, v in args.training_protocol.items()
+            if k not in ("accumulate", "profile_training", "epochs")
+        }
         if previous != current:
             raise ValueError("resume protocol differs from the saved training run")
         model.load_state_dict(saved["model"])
@@ -285,6 +305,7 @@ def fit(model, rows, args, teacher_model=None):
         torch.manual_seed(args.seed + epoch)
         started = perf_counter()
         total = 0.0
+        timer = StageTimer(args.device, args.profile_training)
         optimizer.zero_grad()
         epoch_rows = (
             rows.epoch(epoch)
@@ -293,6 +314,7 @@ def fit(model, rows, args, teacher_model=None):
         )
         iterator = iter(epoch_rows)
         processed = 0
+        padding = total_tokens = 0
         input_wait = 0.0
         step = 0
         batches = math.ceil(len(rows) / args.batch_size)
@@ -304,60 +326,40 @@ def fit(model, rows, args, teacher_model=None):
                 raise RuntimeError(
                     "training stream ended before the epoch was complete"
                 )
-            ranks, batch_scores = model.forward_batch(batch_rows)
-            missing = [i for i, row in enumerate(batch_rows) if "teacher" not in row]
-            if missing:
-                batch = collate([batch_rows[i]["state"] for i in missing])
-                batch = {key: value.to(args.device) for key, value in batch.items()}
+            with timer.stage("collate"):
+                cpu_batch = collate_pairs(batch_rows)
+            length = (
+                3
+                + cpu_batch["content"].shape[1]
+                + cpu_batch["vertices"].shape[1]
+                + cpu_batch["pair_ids"].shape[1]
+            )
+            total_tokens += length * len(batch_rows)
+            valid = (
+                3 * len(batch_rows)
+                + cpu_batch["tok_mask"].sum()
+                + cpu_batch["vertex_keep"].sum()
+                + cpu_batch["pair_keep"].sum()
+            )
+            padding += length * len(batch_rows) - int(valid)
+            ranks, scores, batch = model.forward_padded(
+                cpu_batch, timer, return_inputs=True
+            )
+            with timer.stage("teacher"):
                 with torch.no_grad():
                     teacher_ranks = teacher_model(batch).detach()
-                for j, i in enumerate(missing):
-                    ids = torch.tensor(batch_rows[i]["local"], device=args.device)
-                    batch_rows[i]["teacher"] = teacher_ranks[j, ids]
-            losses = []
-            for i, row in enumerate(batch_rows):
-                scores = batch_scores[i]
-                local = torch.tensor(row["local"], device=args.device)
-                teacher = row["teacher"].to(args.device)
-                loss = F.kl_div(
-                    F.log_softmax(ranks[i, local], dim=-1),
-                    F.softmax(teacher, dim=-1),
-                    reduction="sum",
-                )
-                if "target_image" in row:
-                    loss = loss + F.cross_entropy(
-                        ranks[i : i + 1],
-                        torch.tensor([row["target_image"]], device=args.device),
-                    )
-                if len(scores):
-                    gains = row["gains"].to(args.device)
-                    targets = gains.sign() * gains.abs().log1p()
-                    loss = (
-                        loss
-                        + (
-                            F.smooth_l1_loss(scores, targets, reduction="none")
-                            * (1 + 2 * (gains > 0))
-                        ).mean()
-                    )
-                    logits = torch.cat((scores, scores.new_zeros(1)))
-                    best = (
-                        int(row["gains"].argmax())
-                        if row["gains"].max() > 0
-                        else len(scores)
-                    )
-                    loss = loss + 0.1 * F.cross_entropy(
-                        logits[None], torch.tensor([best], device=args.device)
-                    )
-                losses.append(loss)
-            loss = torch.stack(losses).mean()
+            with timer.stage("loss"):
+                loss = pair_loss(ranks, scores, batch, teacher_ranks)
             # Weight each batch by its size within this optimizer update.
             group_start = (step // args.accumulate) * args.accumulate * args.batch_size
             group_size = min(args.accumulate * args.batch_size, len(rows) - group_start)
-            (loss * len(batch_rows) / group_size).backward()
+            with timer.stage("backward"):
+                (loss * len(batch_rows) / group_size).backward()
             if (step + 1) % args.accumulate == 0 or step + 1 == batches:
-                torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
-                optimizer.step()
-                optimizer.zero_grad()
+                with timer.stage("optimizer"):
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+                    optimizer.step()
+                    optimizer.zero_grad()
             total += loss.item() * len(batch_rows)
             processed += len(batch_rows)
             step += 1
@@ -374,10 +376,12 @@ def fit(model, rows, args, teacher_model=None):
             effective_batch_size=args.batch_size * args.accumulate,
             workers=args.workers,
         )
+        record["stage_seconds"] = timer.seconds
+        record["synchronized_timing"] = args.profile_training
+        record["padding_fraction"] = padding / max(total_tokens, 1)
         if hasattr(rows, "last_epoch_stats"):
             record.update(rows.last_epoch_stats)
-        with (args.output / "training.jsonl").open("a") as log:
-            log.write(json.dumps(record) + "\n")
+        checkpoint_started = perf_counter()
         temporary = progress.with_suffix(".tmp")
         torch.save(
             dict(
@@ -389,6 +393,10 @@ def fit(model, rows, args, teacher_model=None):
             temporary,
         )
         temporary.replace(progress)
+        record["checkpoint_seconds"] = perf_counter() - checkpoint_started
+        record["seconds_including_checkpoint"] = perf_counter() - started
+        with (args.output / "training.jsonl").open("a") as log:
+            log.write(json.dumps(record) + "\n")
         print(f"Epoch {epoch + 1}/{args.epochs}: {record}", flush=True)
     return model.eval()
 
@@ -414,13 +422,20 @@ def main():
     p.add_argument("--reference-batch", type=int, default=128)
     p.add_argument("--batch-size", type=int, default=16)
     p.add_argument("--workers", type=int, default=4)
+    p.add_argument(
+        "--profile-training",
+        action="store_true",
+        help="synchronize CUDA at stage boundaries for diagnostic timings",
+    )
 
     p.add_argument(
         "--from-scratch",
         action="store_true",
         help="randomly initialize the residual Transformer, embeddings and heads; use the checkpoint as teacher",
     )
-    p.add_argument("--phase", choices=("all", "train", "test"), default="all")
+    p.add_argument(
+        "--phase", choices=("all", "train", "test", "profile"), default="all"
+    )
     p.add_argument("--sizes", nargs="+", type=int, default=[10, 16, 24, 32])
     for name, value in (
         ("depth", 10),
@@ -487,6 +502,7 @@ def main():
             "resume",
             "batch_size",
             "workers",
+            "profile_training",
         )
     }
     protocol["checkpoint_digest"] = checkpoint_digest(args.checkpoint)
@@ -533,6 +549,14 @@ def main():
             if hasattr(rows, "close"):
                 rows.close()
         timings["training_seconds"] = perf_counter() - start
+        if args.phase == "profile":
+            write_json(args.output / "timings.json", timings)
+            write_json(args.output / "protocol.json", protocol)
+            print(
+                "Training profile saved. Resume from training_progress.pt to continue.",
+                flush=True,
+            )
+            return
         start = perf_counter()
         trials = []
         for threshold in (None, "always", 0.0, 0.1, 0.5):

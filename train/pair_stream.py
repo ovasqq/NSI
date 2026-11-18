@@ -18,6 +18,7 @@ from queries.euler import euler_sequence
 from queries.random_walk import Query, random_walk_vertices
 from search.pruning import ResidualPruner
 from train.dataset import component_sizes
+from train.stage_timer import StageTimer
 
 
 class PairStateStream:
@@ -61,7 +62,12 @@ class PairStateStream:
         return state
 
     def epoch(self, epoch):
-        self.last_epoch_stats = dict(sampling_seconds=0.0, profitable=0, censored=0)
+        self.last_epoch_stats = dict(
+            sampling_seconds=0.0,
+            profitable=0,
+            censored=0,
+            preparation_worker_seconds={},
+        )
         workers = getattr(self.args, "workers", 0)
         if workers:
             if not hasattr(self, "pool"):
@@ -98,6 +104,14 @@ class PairStateStream:
             self.last_epoch_stats["profitable"] += int(
                 len(row["gains"]) > 0 and row["gains"].max().item() > 0
             )
+            stages = self.last_epoch_stats["preparation_worker_seconds"]
+            measured = dict(row["label_stage_seconds"], **row["sampling_stage_seconds"])
+            for key, seconds in measured.items():
+                stages[key] = stages.get(key, 0.0) + seconds
+            other = row["sampling_seconds"] - sum(measured.values())
+            stages["other_generation"] = (
+                stages.get("other_generation", 0.0) + other
+            )
             yield row
 
     def close(self):
@@ -113,6 +127,7 @@ class PairStateStream:
         rng = np.random.default_rng([args.seed, epoch, index, 49])
         preferred = int(self.starts[index % len(self.starts)])
         started = perf_counter()
+        sampler = StageTimer("cpu", enabled=True)
         for attempt in range(200):
             start = preferred if attempt == 0 else int(rng.choice(self.starts))
             size = int(
@@ -120,31 +135,39 @@ class PairStateStream:
                     args.depth + 2, min(max(args.sizes), self.components[start]) + 1
                 )
             )
-            origin = random_walk_vertices(graph, start, size, rng)
-            if origin is None:
+            with sampler.stage("walk_query"):
+                origin = random_walk_vertices(graph, start, size, rng)
+                query = (
+                    Query(graph.induced_subgraph(origin), origin)
+                    if origin is not None
+                    else None
+                )
+            if query is None:
                 continue
-            query = Query(graph.induced_subgraph(origin), origin)
             if fingerprint(query) in self.excluded:
                 continue
-            space = search_space(query.graph, graph)
-            depth = int(rng.integers(args.depth, size - 1))
-            mapping = [-1] * size
-            for u in space.order[:depth]:
-                mapping[u] = origin[u]
-            # Half the attempts test an alternative at the last assignment.
-            # Its compatibility with the already fixed prefix is exact.
-            last = space.order[depth - 1]
-            if rng.random() < 0.5:
-                mapping[last] = -1
+            with sampler.stage("filter_order"):
+                space = search_space(query.graph, graph)
+            with sampler.stage("mapping_domains"):
+                depth = int(rng.integers(args.depth, size - 1))
+                mapping = [-1] * size
+                for u in space.order[:depth]:
+                    mapping[u] = origin[u]
+                # Half the attempts test an alternative at the last assignment.
+                # Its compatibility with the already fixed prefix is exact.
+                last = space.order[depth - 1]
+                if rng.random() < 0.5:
+                    mapping[last] = -1
+                    used = {v for v in mapping if v >= 0}
+                    local = space.local_candidates(depth - 1, mapping, used)
+                    mapping[last] = int(rng.choice(local))
                 used = {v for v in mapping if v >= 0}
-                local = space.local_candidates(depth - 1, mapping, used)
-                mapping[last] = int(rng.choice(local))
-            used = {v for v in mapping if v >= 0}
-            pruner = ResidualPruner(space, "forward")
-            domains = pruner.build_domains(depth, mapping, used)
+                pruner = ResidualPruner(space, "forward")
+                domains = pruner.build_domains(depth, mapping, used)
             if domains is None:
                 continue
-            sequence = euler_sequence(query.graph)
+            with sampler.stage("euler_encoding"):
+                sequence = euler_sequence(query.graph)
             if len(sequence) > self.max_sequence_length:
                 continue
             hook = SimpleNamespace(qenc=encode_query(query.graph, sequence))
@@ -166,6 +189,7 @@ class PairStateStream:
             if all(mapping[u] == origin[u] for u in space.order[:depth]):
                 row["target_image"] = origin[space.order[depth]]
             row["sampling_seconds"] = perf_counter() - started
+            row["sampling_stage_seconds"] = sampler.seconds
             return row
         else:
             raise RuntimeError(

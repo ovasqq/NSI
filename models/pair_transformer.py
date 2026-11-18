@@ -1,6 +1,8 @@
 """NeuGN with explicit domain-pair tokens and relation-biased attention."""
 
 from copy import deepcopy
+from contextlib import nullcontext
+from models.pair_batch import collate_pairs
 
 import torch
 from torch import nn
@@ -174,32 +176,127 @@ class PairTransformer(nn.Module):
         return ranks[0], scores[0]
 
     def forward_batch(self, rows):
+        batch = collate_pairs(rows)
+        ranks, scores = self.forward_padded(batch)
+        return ranks, [scores[i, : len(row["actions"])] for i, row in enumerate(rows)]
+
+    def forward_padded(self, batch, timer=None, *, return_inputs=False):
         model = self.neugn
         device = model.anchor.device
-        prepared = [self.prepare(row) for row in rows]
-        maximum = max(tokens.shape[0] for tokens, *_ in prepared)
-        tokens = torch.stack(
-            [
-                torch.nn.functional.pad(item[0], (0, 0, 0, maximum - item[0].shape[0]))
-                for item in prepared
-            ]
-        )
-        masks = []
-        for item in prepared:
-            length = item[0].shape[0]
-            mask = torch.nn.functional.pad(
-                item[1], (0, maximum - length, 0, maximum - length)
+        stage = timer.stage if timer is not None else lambda _: nullcontext()
+        with stage("transfer"):
+            batch = {key: value.to(device) for key, value in batch.items()}
+        with stage("tokenize"):
+            hq, qvectors = ResidualArcHead.query_context(model, batch)
+            vertices, owners, ids = (
+                batch["vertices"],
+                batch["owners"],
+                batch["pair_ids"],
             )
-            mask[:, :, length:] = float("-inf")
-            masks.append(mask)
-        hidden = model.encoder(tokens, mask=torch.cat(masks), is_causal=False)
-        ranks = model.out(hidden[:, 1])
-        scores = []
-        for index, (row, item) in enumerate(zip(rows, prepared)):
-            _, _, p, n, owners = item
-            output = hidden[index, : item[0].shape[0]]
-            scores.append(self.fragment_scores(row, output, p, n, owners))
-        return ranks, scores
+            d = model.cfg.d
+            query_features = qvectors.gather(1, vertices[..., None].expand(-1, -1, d))
+            qtokens = (
+                query_features
+                + model.qvert_emb(vertices % model.qvert_emb.num_embeddings)
+                + self.stats(batch["stats"])
+                + self.types.weight[0]
+            )
+            ptokens = qtokens.gather(1, owners[..., None].expand(-1, -1, d))
+            ptokens = ptokens + model.content_emb(ids) + self.types.weight[1]
+            count, n, k = len(vertices), vertices.shape[1], ids.shape[1]
+            prefix = torch.cat(
+                (
+                    hq[:, None],
+                    model.anchor.expand(count, 1, -1),
+                    (model.anchor + self.check).expand(count, 1, -1),
+                    model.mapping_tokens(batch),
+                ),
+                dim=1,
+            )
+            p = prefix.shape[1]
+            if p > model.pos_emb.num_embeddings:
+                raise ValueError(
+                    "mapping sequence exceeds the checkpoint positional vocabulary"
+                )
+            prefix = prefix + model.pos_emb(torch.arange(p, device=device))[None]
+            tokens = model.norm_in(torch.cat((prefix, qtokens, ptokens), dim=1))
+        with stage("attention_relations"):
+            heads = model.cfg.heads
+            bias = tokens.new_zeros((count, heads, tokens.shape[1], tokens.shape[1]))
+            membership = (
+                torch.arange(n, device=device)[None, :, None] == owners[:, None]
+            )
+            if k:
+                relations = batch["relations"]
+                if self.graph_edges is not None:
+                    same_owner = owners[:, :, None] == owners[:, None, :]
+                    same_image = ids[:, :, None] == ids[:, None, :]
+                    query_edges = batch["query_edges"]
+                    required = query_edges[
+                        torch.arange(count, device=device)[:, None, None],
+                        owners[:, :, None],
+                        owners[:, None, :],
+                    ]
+                    actual = self.graph_edges[ids[:, :, None], ids[:, None, :]]
+                    computed = torch.stack(
+                        (
+                            same_owner,
+                            same_image & ~same_owner,
+                            required & actual & ~same_image,
+                            required & (~actual | same_image),
+                        ),
+                        dim=-1,
+                    )
+                    relations = torch.where(
+                        batch["device_relations"][:, None, None, None],
+                        computed,
+                        relations,
+                    )
+                elif batch["device_relations"].any():
+                    raise ValueError(
+                        "device relation construction requires a cached graph"
+                    )
+                relation_bias = relations.to(tokens.dtype) @ self.relations
+                bias[:, :, p + n :, p + n :] = relation_bias.permute(0, 3, 1, 2)
+                bias[:, :, p : p + n, p + n :] = (
+                    membership[:, None] * self.belongs[None, :, None, None]
+                )
+                bias[:, :, p + n :, p : p + n] = (
+                    membership.transpose(1, 2)[:, None]
+                    * self.belongs[None, :, None, None]
+                )
+            bias[:, :, p : p + n, p : p + n] = (
+                batch["query_edges"][:, None] * self.belongs[None, :, None, None]
+            )
+            keep = torch.cat(
+                (
+                    torch.ones((count, 3), device=device, dtype=torch.bool),
+                    batch["tok_mask"],
+                    batch["vertex_keep"],
+                    batch["pair_keep"],
+                ),
+                dim=1,
+            )
+            bias = bias.masked_fill(~keep[:, None, None], float("-inf"))
+        with stage("encoder"):
+            hidden = model.encoder(tokens, mask=bias.flatten(0, 1), is_causal=False)
+        with stage("readout"):
+            ranks = model.out(hidden[:, 1])
+            actions = batch["actions"].to(hidden.dtype)
+            size = actions.sum(-1, keepdim=True)
+            qpool = (actions @ hidden[:, p : p + n]) / size.clamp_min(1)
+            pair_membership = actions.gather(
+                2, owners[:, None].expand(-1, actions.shape[1], -1)
+            )
+            pair_membership = pair_membership * batch["pair_keep"][:, None]
+            ppool = (pair_membership @ hidden[:, p + n :]) / pair_membership.sum(
+                -1, keepdim=True
+            ).clamp_min(1)
+            check = hidden[:, 2:3].expand(-1, actions.shape[1], -1)
+            scores = self.select(
+                torch.cat((qpool, ppool, check, size / 4), dim=-1)
+            ).squeeze(-1)
+        return (ranks, scores, batch) if return_inputs else (ranks, scores)
 
     def fragment_scores(self, row, output, p, n, owners):
         device = output.device

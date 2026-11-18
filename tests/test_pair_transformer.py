@@ -183,3 +183,72 @@ def test_batched_padding_and_cached_relations_match_single_state():
     rank, scores = model.forward_batch([row, shorter])
     (rank.square().mean() + sum(score.square().mean() for score in scores)).backward()
     assert model.relations.grad is not None
+
+
+def test_vectorized_batch_matches_original_per_state_computation():
+    _, row = example()
+    teacher = NeuGN(NeuGNConfig(5, 1, d=8, heads=2, ffn=16, layers=1)).eval()
+    model = PairTransformer(teacher).eval()
+    tokens, bias, p, n, owners = model.prepare(row)
+    output = model.neugn.encoder(tokens[None], mask=bias, is_causal=False)[0]
+    reference_rank = model.neugn.out(output[1])
+    reference_score = model.fragment_scores(row, output, p, n, owners)
+    rank, score = model(row)
+    torch.testing.assert_close(rank, reference_rank)
+    torch.testing.assert_close(score, reference_score)
+
+
+def test_vectorized_loss_matches_mean_of_individual_losses():
+    from models.pair_batch import collate_pairs
+    from train.pair_loss import pair_loss
+    from torch.nn import functional as F
+
+    _, row = example()
+    row["gains"] = torch.linspace(-0.1, 0.2, len(row["actions"]))
+    row["teacher"] = torch.randn(len(row["local"]))
+    shorter = dict(
+        row,
+        actions=row["actions"][:0],
+        gains=torch.empty(0),
+        local=row["local"][:1],
+        teacher=row["teacher"][:1],
+        target_image=1,
+    )
+    rows = [row, shorter]
+    batch = collate_pairs(rows)
+    ranks = torch.randn(2, 5, requires_grad=True)
+    scores = torch.randn(2, len(row["actions"]), requires_grad=True)
+    actual = pair_loss(ranks, scores, batch, torch.zeros_like(ranks))
+    references = []
+    for i, r in enumerate(rows):
+        ids = torch.tensor(r["local"])
+        loss = F.kl_div(
+            F.log_softmax(ranks[i, ids], -1),
+            F.softmax(r["teacher"], -1),
+            reduction="sum",
+        )
+        if "target_image" in r:
+            loss = loss + F.cross_entropy(
+                ranks[i : i + 1], torch.tensor([r["target_image"]])
+            )
+        if len(r["actions"]):
+            gain = r["gains"]
+            values = scores[i, : len(gain)]
+            target = gain.sign() * gain.abs().log1p()
+            loss = (
+                loss
+                + (
+                    F.smooth_l1_loss(values, target, reduction="none")
+                    * (1 + 2 * (gain > 0))
+                ).mean()
+            )
+            best = int(gain.argmax()) if gain.max() > 0 else len(gain)
+            loss = loss + 0.1 * F.cross_entropy(
+                torch.cat((values, values.new_zeros(1)))[None], torch.tensor([best])
+            )
+        references.append(loss)
+    expected = torch.stack(references).mean()
+    torch.testing.assert_close(actual, expected)
+    actual.backward()
+    assert torch.isfinite(ranks.grad).all()
+    assert torch.isfinite(scores.grad).all()
