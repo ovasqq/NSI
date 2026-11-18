@@ -147,6 +147,7 @@ def enumerate_space(
     fragment: FragmentSelector | None = None,
     fragment_budget: int = 0,
     fragment_depth: int = 10,
+    branch_check: Callable[[int, list[int], set[int]], bool] | None = None,
 ) -> SearchResult:
     """Skip pruning for the first prune_after_steps attempts. The optional
     deadline uses perf_counter(). A prefix contains already assigned data
@@ -213,7 +214,12 @@ def enumerate_space(
                 if before_check is not None:
                     before_check(state, mapping)
                 rejected = False
+                if branch_check is not None:
+                    rejected = branch_check(i + 1, mapping, used)
+                    if deadline is not None:
+                        check_deadline(deadline)
                 should_check = pruner is not None and res.steps > prune_after_steps
+                should_check = should_check and not rejected
                 if should_check and pruning_policy is not None:
                     started = perf_counter()
                     should_check = pruning_policy(state)
