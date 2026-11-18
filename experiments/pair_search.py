@@ -4,6 +4,8 @@ import argparse
 import csv
 import json
 import math
+from itertools import islice
+from models.encoding import collate
 from pathlib import Path
 from time import perf_counter
 import numpy as np
@@ -76,6 +78,7 @@ class Search:
                 options,
                 self.args.candidates,
                 self.args.max_pairs,
+                relations_on_device=getattr(self.args, "relations_on_device", False),
             )
             self.metrics["encoding_seconds"] += perf_counter() - start
             start = perf_counter()
@@ -140,7 +143,9 @@ def run(query, g, backbone, model, args, mode, threshold):
     )
 
 
-def label_state(space, hook, mapping, domains, prefix, remaining, args):
+def label_state(
+    space, hook, mapping, domains, prefix, remaining, args, *, teacher_scores=True
+):
     stats = {"censored": 0}
     depth = len(prefix)
     options = proposals(space, domains, args.proposals)
@@ -152,6 +157,7 @@ def label_state(space, hook, mapping, domains, prefix, remaining, args):
         options,
         args.candidates,
         args.max_pairs,
+        relations_on_device=getattr(args, "relations_on_device", False),
     )
     if not row["local"]:
         return None, 0
@@ -166,7 +172,7 @@ def label_state(space, hook, mapping, domains, prefix, remaining, args):
         start = perf_counter()
         replay = enumerate_space(
             space,
-            hook,
+            hook if callable(hook) else None,
             pruning="forward",
             prefix=prefix,
             max_steps=remaining,
@@ -183,11 +189,9 @@ def label_state(space, hook, mapping, domains, prefix, remaining, args):
     )
     # scores() uses the pretrained model even beyond the early
     # inference depth limit, providing a distillation target.
-    teacher = hook.scores(mapping, space.order[depth], row["local"])
-    row.update(
-        gains=gains,
-        teacher=teacher,
-    )
+    row["gains"] = gains
+    if teacher_scores:
+        row["teacher"] = hook.scores(mapping, space.order[depth], row["local"])
     return row, stats["censored"]
 
 
@@ -261,7 +265,7 @@ def collect(sets, g, backbone, args):
     return rows
 
 
-def fit(model, rows, args):
+def fit(model, rows, args, teacher_model=None):
     model.train()
     optimizer = torch.optim.AdamW(model.parameters(), lr=args.lr)
     rng = np.random.default_rng(args.seed)
@@ -269,7 +273,10 @@ def fit(model, rows, args):
     progress = args.output / "training_progress.pt"
     if args.resume:
         saved = torch.load(progress, map_location=args.device, weights_only=True)
-        if saved["protocol"] != args.training_protocol:
+        # Gradient accumulation may change with the physical batch size.
+        previous = {k: v for k, v in saved["protocol"].items() if k != "accumulate"}
+        current = {k: v for k, v in args.training_protocol.items() if k != "accumulate"}
+        if previous != current:
             raise ValueError("resume protocol differs from the saved training run")
         model.load_state_dict(saved["model"])
         optimizer.load_state_dict(saved["optimizer"])
@@ -284,51 +291,88 @@ def fit(model, rows, args):
             if hasattr(rows, "epoch")
             else (rows[i] for i in rng.permutation(len(rows)))
         )
-        for step, row in enumerate(epoch_rows):
-            ranks, scores = model(row)
-            local = torch.tensor(row["local"], device=args.device)
-            teacher = row["teacher"].to(args.device)
-            loss = F.kl_div(
-                F.log_softmax(ranks[local], dim=-1),
-                F.softmax(teacher, dim=-1),
-                reduction="sum",
-            )
-            if "target_image" in row:
-                loss = loss + F.cross_entropy(
-                    ranks[None], torch.tensor([row["target_image"]], device=args.device)
+        iterator = iter(epoch_rows)
+        processed = 0
+        input_wait = 0.0
+        step = 0
+        batches = math.ceil(len(rows) / args.batch_size)
+        while processed < len(rows):
+            wait_started = perf_counter()
+            batch_rows = list(islice(iterator, args.batch_size))
+            input_wait += perf_counter() - wait_started
+            if not batch_rows:
+                raise RuntimeError(
+                    "training stream ended before the epoch was complete"
                 )
-            if len(scores):
-                gains = row["gains"].to(args.device)
-                targets = gains.sign() * gains.abs().log1p()
-                loss = (
-                    loss
-                    + (
-                        F.smooth_l1_loss(scores, targets, reduction="none")
-                        * (1 + 2 * (gains > 0))
-                    ).mean()
+            ranks, batch_scores = model.forward_batch(batch_rows)
+            missing = [i for i, row in enumerate(batch_rows) if "teacher" not in row]
+            if missing:
+                batch = collate([batch_rows[i]["state"] for i in missing])
+                batch = {key: value.to(args.device) for key, value in batch.items()}
+                with torch.no_grad():
+                    teacher_ranks = teacher_model(batch).detach()
+                for j, i in enumerate(missing):
+                    ids = torch.tensor(batch_rows[i]["local"], device=args.device)
+                    batch_rows[i]["teacher"] = teacher_ranks[j, ids]
+            losses = []
+            for i, row in enumerate(batch_rows):
+                scores = batch_scores[i]
+                local = torch.tensor(row["local"], device=args.device)
+                teacher = row["teacher"].to(args.device)
+                loss = F.kl_div(
+                    F.log_softmax(ranks[i, local], dim=-1),
+                    F.softmax(teacher, dim=-1),
+                    reduction="sum",
                 )
-                # A zero-valued skip participates in the action ranking.
-                logits = torch.cat((scores, scores.new_zeros(1)))
-                best = int(gains.argmax()) if gains.max() > 0 else len(scores)
-                loss = loss + 0.1 * F.cross_entropy(
-                    logits[None], torch.tensor([best], device=args.device)
-                )
-            count = min(
-                args.accumulate, len(rows) - step // args.accumulate * args.accumulate
-            )
-            (loss / count).backward()
-            if (step + 1) % args.accumulate == 0 or step + 1 == len(rows):
+                if "target_image" in row:
+                    loss = loss + F.cross_entropy(
+                        ranks[i : i + 1],
+                        torch.tensor([row["target_image"]], device=args.device),
+                    )
+                if len(scores):
+                    gains = row["gains"].to(args.device)
+                    targets = gains.sign() * gains.abs().log1p()
+                    loss = (
+                        loss
+                        + (
+                            F.smooth_l1_loss(scores, targets, reduction="none")
+                            * (1 + 2 * (gains > 0))
+                        ).mean()
+                    )
+                    logits = torch.cat((scores, scores.new_zeros(1)))
+                    best = (
+                        int(row["gains"].argmax())
+                        if row["gains"].max() > 0
+                        else len(scores)
+                    )
+                    loss = loss + 0.1 * F.cross_entropy(
+                        logits[None], torch.tensor([best], device=args.device)
+                    )
+                losses.append(loss)
+            loss = torch.stack(losses).mean()
+            # Weight each batch by its size within this optimizer update.
+            group_start = (step // args.accumulate) * args.accumulate * args.batch_size
+            group_size = min(args.accumulate * args.batch_size, len(rows) - group_start)
+            (loss * len(batch_rows) / group_size).backward()
+            if (step + 1) % args.accumulate == 0 or step + 1 == batches:
                 torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
                 optimizer.step()
                 optimizer.zero_grad()
-            total += loss.item()
-            if (step + 1) % 1024 == 0:
-                print(f"Epoch {epoch + 1}: {step + 1}/{len(rows)} states", flush=True)
+            total += loss.item() * len(batch_rows)
+            processed += len(batch_rows)
+            step += 1
+            if processed % 1024 < args.batch_size or processed == len(rows):
+                print(f"Epoch {epoch + 1}: {processed}/{len(rows)} states", flush=True)
         record = dict(
             epoch=epoch + 1,
             states=len(rows),
             loss=total / len(rows),
             seconds=perf_counter() - started,
+            input_wait_seconds=input_wait,
+            batch_size=args.batch_size,
+            accumulate=args.accumulate,
+            effective_batch_size=args.batch_size * args.accumulate,
+            workers=args.workers,
         )
         if hasattr(rows, "last_epoch_stats"):
             record.update(rows.last_epoch_stats)
@@ -368,6 +412,8 @@ def main():
         help="0 matches the ordinary NeuGN batch-rounded epoch size",
     )
     p.add_argument("--reference-batch", type=int, default=128)
+    p.add_argument("--batch-size", type=int, default=16)
+    p.add_argument("--workers", type=int, default=4)
 
     p.add_argument(
         "--from-scratch",
@@ -404,6 +450,7 @@ def main():
     if (
         args.seed < 0
         or args.states_per_epoch < 0
+        or args.workers < 0
         or min(args.sizes) < 3
         or len(set(args.sizes)) != len(args.sizes)
         or (
@@ -411,7 +458,8 @@ def main():
                 (
                     v
                     for k, v in vars(args).items()
-                    if type(v) in (int, float) and k not in ("seed", "states_per_epoch")
+                    if type(v) in (int, float)
+                    and k not in ("seed", "states_per_epoch", "workers")
                 )
             )
             <= 0
@@ -430,7 +478,16 @@ def main():
     protocol = {
         k: v
         for k, v in vars(args).items()
-        if k not in ("output", "checkpoint", "phase", "repeats", "resume")
+        if k
+        not in (
+            "output",
+            "checkpoint",
+            "phase",
+            "repeats",
+            "resume",
+            "batch_size",
+            "workers",
+        )
     }
     protocol["checkpoint_digest"] = checkpoint_digest(args.checkpoint)
     backbone = load_model(args.checkpoint, args.device).eval().requires_grad_(False)
@@ -447,6 +504,7 @@ def main():
         from train.pair_stream import PairStateStream
 
         protocol["resolved_states_per_epoch"] = PairStateStream.epoch_size(g, args)
+    args.relations_on_device = model.cache_graph(g)
     path = args.output / "pair_transformer.pt"
     if args.phase == "test":
         saved = torch.load(path, map_location=args.device, weights_only=True)
@@ -469,7 +527,11 @@ def main():
         )
         timings = {timing_key: perf_counter() - start}
         start = perf_counter()
-        fit(model, rows, args)
+        try:
+            fit(model, rows, args, backbone)
+        finally:
+            if hasattr(rows, "close"):
+                rows.close()
         timings["training_seconds"] = perf_counter() - start
         start = perf_counter()
         trials = []
