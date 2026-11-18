@@ -17,6 +17,9 @@ from models.encoding import encode_query
 from queries.euler import euler_sequence
 from queries.random_walk import Query, random_walk_vertices
 from search.pruning import ResidualPruner
+from search.nlf_index import NLFIndex
+from search.enumerate import SearchSpace
+from search.order import gql_order
 from train.dataset import component_sizes
 from train.stage_timer import StageTimer
 
@@ -32,6 +35,7 @@ class PairStateStream:
     def __init__(self, graph, teacher, sets, args):
         self.graph, self.teacher, self.args = graph, teacher, args
         self.max_sequence_length = teacher.pos_emb.num_embeddings - 3
+        self.nlf_index = NLFIndex(graph)
         self.components = component_sizes(graph)
         self.starts = np.flatnonzero(self.components >= args.depth + 2)
         if not len(self.starts):
@@ -109,9 +113,7 @@ class PairStateStream:
             for key, seconds in measured.items():
                 stages[key] = stages.get(key, 0.0) + seconds
             other = row["sampling_seconds"] - sum(measured.values())
-            stages["other_generation"] = (
-                stages.get("other_generation", 0.0) + other
-            )
+            stages["other_generation"] = stages.get("other_generation", 0.0) + other
             yield row
 
     def close(self):
@@ -120,7 +122,6 @@ class PairStateStream:
             del self.pool
 
     def make_state(self, epoch, index):
-        from experiments.fragment_pruning import search_space
         from experiments.pair_search import label_state
 
         args, graph = self.args, self.graph
@@ -146,8 +147,11 @@ class PairStateStream:
                 continue
             if fingerprint(query) in self.excluded:
                 continue
-            with sampler.stage("filter_order"):
-                space = search_space(query.graph, graph)
+            with sampler.stage("nlf"):
+                candidates = self.nlf_index.filter(query.graph)
+            with sampler.stage("order_space"):
+                order = gql_order(query.graph, candidates)
+                space = SearchSpace(query.graph, graph, candidates, order)
             with sampler.stage("mapping_domains"):
                 depth = int(rng.integers(args.depth, size - 1))
                 mapping = [-1] * size
