@@ -35,7 +35,7 @@ def fingerprint(query):
     return tuple(query.graph.labels.tolist()), tuple(query.graph.edges())
 
 
-def load_splits(g, args):
+def load_splits(g, args, *, query_dir=None):
     sets = {}
     train_end = args.train_queries
     val_end = train_end + args.validation_queries
@@ -43,7 +43,11 @@ def load_splits(g, args):
     for size in args.sizes:
         for i, density in enumerate(DENSITIES):
             path = query_set_path(args.graph, size, density)
-            if not path.exists():
+            if query_dir is not None:
+                path = query_dir / path.name
+                if not path.is_file():
+                    raise FileNotFoundError(path)
+            elif not path.exists():
                 path = args.output / "queries" / path.name
                 if not path.exists():
                     seed = size * 10 + i
