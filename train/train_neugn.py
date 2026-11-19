@@ -75,7 +75,11 @@ def main() -> None:
 
     torch.manual_seed(args.seed)
     device = pick_device(args.device)
-    g = load(args.graph)
+    if args.graph == "dblp_proxy15":
+        from data.dblp import load_dblp_proxy15
+        g = load_dblp_proxy15()
+    else:
+        g = load(args.graph)
     run_dir = CKPT_DIR / args.graph / args.run
     run_dir.mkdir(parents=True, exist_ok=True)
     ckpt_path = run_dir / "model.pt"

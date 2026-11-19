@@ -154,19 +154,36 @@ class ResidualPruner:
         return None
 
     def build_domains(
-        self, depth: int, mapping: list[int], used: set[int]
-    ) -> dict[int, frozenset[int]] | None:
+        self, depth: int, mapping: list[int], used: set[int], *, vertices: tuple[int, ...] | None = None
+    ) -> Domains | None:
         space = self.space
         g_adj = space.g.adj_set
         q_adj = space.q.adj_set
         domains = {}
-        for u in space.order[depth:]:
+        for u in (space.order[depth:] if vertices is None else vertices):
             mapped_neighbours = [g_adj[mapping[w]] for w in q_adj[u] if mapping[w] != -1]
             candidates = space.cand_set[u].intersection(*mapped_neighbours).difference(used)
             if not candidates:
                 return None
             domains[u] = candidates
         return domains
+
+    def extend_domains(self, parent: Domains, vertex: int, image: int) -> Domains | None:
+        """Apply one assignment to exact forward domains; share untouched sets."""
+        q_neighbors = self.space.q.adj_set[vertex]
+        g_neighbors = self.space.g.adj_set[image]
+        child = {}
+        for u, candidates in parent.items():
+            if u == vertex:
+                continue
+            if u in q_neighbors:
+                candidates = candidates.intersection(g_neighbors)
+            if image in candidates:
+                candidates = candidates.difference((image,))
+            if not candidates:
+                return None
+            child[u] = candidates
+        return child
 
     def covers_matching(self, domains: Domains) -> bool:
         started = perf_counter()

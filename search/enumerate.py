@@ -24,7 +24,7 @@ from typing import Callable, Sequence
 import numpy as np
 
 from search.graph import Graph
-from search.pruning import PRUNING_MODES, DeepPruning, FragmentSelector, PruningStats, ResidualPruner
+from search.pruning import PRUNING_MODES, DeepPruning, Domains, FragmentSelector, PruningStats, ResidualPruner
 
 # hook(depth, u, mapping, candidates) -> permutation of candidates.
 # `mapping[w]` is the image of query vertex w, or -1 if w is not mapped yet.
@@ -148,10 +148,15 @@ def enumerate_space(
     fragment_budget: int = 0,
     fragment_depth: int = 10,
     branch_check: Callable[[int, list[int], set[int]], bool] | None = None,
+    branch_domains: Callable[[int, list[int], set[int], Domains | None], Domains | None] | None = None,
 ) -> SearchResult:
     """Skip pruning for the first prune_after_steps attempts. The optional
     deadline uses perf_counter(). A prefix contains already assigned data
     vertices in search order and is assumed to come from a valid DFS branch."""
+    # A domain-producing callback may reject with None. Its accepted snapshot
+    # belongs to this child only; siblings continue from the parent's snapshot.
+    if branch_domains is not None and branch_check is not None:
+        raise ValueError("supply either branch_domains or branch_check")
     if pruning not in PRUNING_MODES:
         raise ValueError(f"unknown pruning mode: {pruning!r}")
     if prune_after_steps < 0:
@@ -181,10 +186,10 @@ def enumerate_space(
             res.timed_out = True
             raise _Stop
 
-    def dfs(i: int) -> None:
+    def dfs(i: int, domains: Domains | None = None) -> None:
         nonlocal backtracks, last_deadend_steps
         u = order[i]
-        local = space.local_candidates(i, mapping, used)
+        local = space.local_candidates(i, mapping, used) if domains is None else sorted(domains[u])
         if reorder is not None and len(local) > 1:
             new = list(reorder(i, u, mapping, local))
             if validate and sorted(new) != local:
@@ -214,7 +219,13 @@ def enumerate_space(
                 if before_check is not None:
                     before_check(state, mapping)
                 rejected = False
-                if branch_check is not None:
+                child_domains = None
+                if branch_domains is not None:
+                    child_domains = branch_domains(i + 1, mapping, used, domains)
+                    rejected = child_domains is None
+                    if deadline is not None:
+                        check_deadline(deadline)
+                elif branch_check is not None:
                     rejected = branch_check(i + 1, mapping, used)
                     if deadline is not None:
                         check_deadline(deadline)
@@ -239,7 +250,7 @@ def enumerate_space(
                         finish = branch_observer(state, mapping, used) if branch_observer else None
                         completed = False
                         try:
-                            dfs(i + 1)
+                            dfs(i + 1, child_domains)
                             completed = True
                         finally:
                             found = res.num_matches > first_match_count
@@ -249,7 +260,7 @@ def enumerate_space(
                             backtracks += 1
                             last_deadend_steps = res.steps - state.step
                     else:
-                        dfs(i + 1)
+                        dfs(i + 1, child_domains)
                 elif track_history:
                     backtracks += 1
                     last_deadend_steps = 0

@@ -45,50 +45,81 @@ def select(space, domains, mode, threshold, limit):
     return "skip", ()
 
 
-def run(query, graph, model, args, mode, threshold):
+def run(query, graph, model, args, mode, threshold, *, gate=None, observe=None):
     start = perf_counter()
     space = search_space(query.graph, graph)
-    hook = NeuGNReorder(model, space.q, args.depth, args.device)
+    hook = NeuGNReorder(model, space.q, args.depth, args.device) if model is not None else None
     pruner = ResidualPruner(space, "forward")
     counts = Counter()
     domain_seconds = select_seconds = check_seconds = 0.0
 
-    def check(depth, mapping, used):
-        nonlocal domain_seconds, select_seconds, check_seconds
+    gate_seconds = 0.0
+    strategy = getattr(args, "domain_strategy", "incremental")
+
+    def advance(depth, mapping, used, parent):
+        nonlocal domain_seconds, select_seconds, check_seconds, gate_seconds
         before = perf_counter()
-        domains = pruner.build_domains(depth, mapping, used)
+        if strategy == "incremental" and parent is not None:
+            vertex = space.order[depth - 1]
+            domains = pruner.extend_domains(parent, vertex, mapping[vertex])
+        else:
+            domains = pruner.build_domains(depth, mapping, used)
         domain_seconds += perf_counter() - before
         counts["domain_calls"] += 1
         if domains is None:
             counts["domain_cuts"] += 1
-            return True
+            return None
         if mode == "forward" or depth < args.depth or len(domains) < 2:
-            return False
+            return domains
         before = perf_counter()
+        if gate is not None:
+            allowed = gate(space, domains)
+            gate_seconds += perf_counter() - before
+            if not allowed:
+                counts["gate_skips"] += 1
+                return domains
+            before = perf_counter()
         action, fragment = select(space, domains, mode, threshold, args.proposals)
         select_seconds += perf_counter() - before
         counts[action] += 1
         if not fragment:
-            return False
+            if observe is not None:
+                observe(space, domains, False)
+            return domains
         before = perf_counter()
-        outcome = check_fragment(space, domains, fragment, args.fragment_budget)
+        # A bounded DFS can reach its limit at a different candidate if a
+        # frozenset was constructed in a different order. Restore historical
+        # iteration order only when the budget could actually interrupt it.
+        if strategy == "incremental" and len(fragment) * prod(len(domains[u]) for u in fragment) > args.fragment_budget:
+            domains_for_check = pruner.build_domains(depth, mapping, used, vertices=fragment)
+        else:
+            domains_for_check = domains
+        outcome = check_fragment(space, domains_for_check, fragment, args.fragment_budget)
         check_seconds += perf_counter() - before
+        if observe is not None:
+            observe(space, domains, outcome is False)
         if outcome is False:
             counts[action + "_cuts"] += 1
-            return True
+            return None
         if outcome is None:
             counts["unknown"] += 1
-        return False
+        return domains
 
     search_start = perf_counter()
-    result = enumerate_space(space, hook, branch_check=check, max_matches=1,
+    if mode == "none":
+        callbacks = {}
+    elif strategy == "rebuild":
+        callbacks = dict(branch_check=lambda d, m, used: advance(d, m, used, None) is None)
+    else:
+        callbacks = dict(branch_domains=advance)
+    result = enumerate_space(space, hook, **callbacks, max_matches=1,
                              max_steps=args.budget, deadline=start + args.time_limit)
     end = perf_counter()
     return dict(mode=mode, threshold=threshold, seconds=end-start, search_seconds=end-search_start,
                 solved=bool(result.num_matches), timed_out=result.timed_out, steps=result.steps,
                 fms=result.first_match_step, complete=result.complete, counts=dict(counts),
                 domain_seconds=domain_seconds, select_seconds=select_seconds,
-                check_seconds=check_seconds, rank_seconds=hook.seconds)
+                check_seconds=check_seconds, gate_seconds=gate_seconds, rank_seconds=hook.seconds if hook is not None else 0.0)
 
 
 def measure(sets, split_name, policies, repeats, graph, model, args):
@@ -140,6 +171,7 @@ def main():
     p = argparse.ArgumentParser(description=__doc__)
     for name in ("checkpoint", "query-dir", "output"):
         p.add_argument("--" + name, type=Path, required=True)
+    p.add_argument("--domain-strategy", choices=("rebuild", "reuse", "incremental"), default="incremental")
     p.add_argument("--graph", default="wikics")
     p.add_argument("--device", default="cpu")
     p.add_argument("--sizes", type=int, nargs="+", default=[16, 24, 32])
