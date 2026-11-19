@@ -45,7 +45,7 @@ def select(space, domains, mode, threshold, limit):
     return "skip", ()
 
 
-def run(query, graph, model, args, mode, threshold, *, gate=None, observe=None):
+def run(query, graph, model, args, mode, threshold, *, gate=None, observe=None, on_cut=None):
     start = perf_counter()
     space = search_space(query.graph, graph)
     hook = NeuGNReorder(model, space.q, args.depth, args.device) if model is not None else None
@@ -80,7 +80,8 @@ def run(query, graph, model, args, mode, threshold, *, gate=None, observe=None):
                 return domains
             before = perf_counter()
         action, fragment = select(space, domains, mode, threshold, args.proposals)
-        select_seconds += perf_counter() - before
+        selected = perf_counter() - before
+        select_seconds += selected
         counts[action] += 1
         if not fragment:
             if observe is not None:
@@ -95,11 +96,14 @@ def run(query, graph, model, args, mode, threshold, *, gate=None, observe=None):
         else:
             domains_for_check = domains
         outcome = check_fragment(space, domains_for_check, fragment, args.fragment_budget)
-        check_seconds += perf_counter() - before
+        checked = perf_counter() - before
+        check_seconds += checked
         if observe is not None:
             observe(space, domains, outcome is False)
         if outcome is False:
             counts[action + "_cuts"] += 1
+            if on_cut is not None:
+                on_cut(space, mapping, depth, fragment, selected + checked)
             return None
         if outcome is None:
             counts["unknown"] += 1

@@ -63,6 +63,7 @@ class SearchResult:
     pruning: PruningStats | None = None
     timed_out: bool = False
     pruning_policy_seconds: float = 0.0
+    subtree_seconds: float = 0.0
 
     @property
     def first_match_step(self) -> int | None:
@@ -144,6 +145,7 @@ def enumerate_space(
     branch_observer: BranchObserver | None = None,
     before_check: BranchVisitor | None = None,
     prefix: Sequence[int] = (),
+    prefix_domains: Domains | None = None,
     fragment: FragmentSelector | None = None,
     fragment_budget: int = 0,
     fragment_depth: int = 10,
@@ -171,6 +173,8 @@ def enumerate_space(
     order = space.order
     if len(prefix) >= n and prefix:
         raise ValueError("the prefix must leave at least one query vertex unassigned")
+    if prefix_domains is not None and (not prefix or branch_domains is None):
+        raise ValueError("prefix domains require a prefix and incremental updates")
     pruner = ResidualPruner(space, pruning, deep_pruning) if pruning != "none" else None
     mapping = [-1] * n
     for u, v in zip(order, prefix):
@@ -271,7 +275,14 @@ def enumerate_space(
         if deadline is not None:
             check_deadline(deadline)
         if all(len(c) for c in space.cand):
-            dfs(len(prefix))
+            if prefix_domains is None:
+                dfs(len(prefix))
+            else:
+                before = perf_counter()
+                try:
+                    dfs(len(prefix), prefix_domains)
+                finally:
+                    res.subtree_seconds = perf_counter() - before
         res.complete = True
     except _Stop:
         # Stopping exactly on the last leaf still leaves the tree unfinished
