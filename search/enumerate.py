@@ -17,6 +17,7 @@ every call, so a hook can never prune the search (completeness).
 
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass, field
 from time import perf_counter
 from typing import Callable, Sequence
@@ -72,6 +73,11 @@ class SearchResult:
 
 class _Stop(Exception):
     pass
+
+
+class _LateCut(Exception):
+    def __init__(self, depth: int):
+        self.depth = depth
 
 
 class SearchSpace:
@@ -151,10 +157,22 @@ def enumerate_space(
     fragment_depth: int = 10,
     branch_check: Callable[[int, list[int], set[int]], bool] | None = None,
     branch_domains: Callable[[int, list[int], set[int], Domains | None], Domains | None] | None = None,
+    late_check: Callable[[int, Domains], bool] | None = None,
+    late_steps: int = 128,
+    late_depth: int = 10,
 ) -> SearchResult:
     """Skip pruning for the first prune_after_steps attempts. The optional
     deadline uses perf_counter(). A prefix contains already assigned data
-    vertices in search order and is assumed to come from a valid DFS branch."""
+    vertices in search order and is assumed to come from a valid DFS branch.
+
+    With late_check, each eligible DFS frame saves its entry domains and
+    schedules one check before its next step after late_steps descendant
+    attempts. Returning True must prove the saved ancestor has no matches.
+    """
+    # The late callback must prove a contradiction for the entire supplied snapshot.
+    if late_check is not None and (branch_domains is None or late_steps < 1 or late_depth < 1):
+        raise ValueError("a late check needs incremental domains and positive depth and step limits")
+    pending: deque[tuple[int, int, Domains]] = deque()
     # A domain-producing callback may reject with None. Its accepted snapshot
     # belongs to this child only; siblings continue from the parent's snapshot.
     if branch_domains is not None and branch_check is not None:
@@ -190,7 +208,25 @@ def enumerate_space(
             res.timed_out = True
             raise _Stop
 
-    def dfs(i: int, domains: Domains | None = None) -> None:
+    def with_late_check(i: int, domains: Domains | None = None) -> None:
+        if i < late_depth or domains is None or len(domains) < 2:
+            descend(i, domains)
+            return
+        ticket = (res.steps + late_steps, i, domains)
+        pending.append(ticket)
+        try:
+            descend(i, domains)
+        except _LateCut as cut:
+            if cut.depth != i:
+                raise
+            for vertex in order[i:]:
+                used.discard(mapping[vertex])
+                mapping[vertex] = -1
+        finally:
+            if pending and pending[-1] is ticket:
+                pending.pop()
+
+    def descend(i: int, domains: Domains | None = None) -> None:
         nonlocal backtracks, last_deadend_steps
         u = order[i]
         local = space.local_candidates(i, mapping, used) if domains is None else sorted(domains[u])
@@ -204,6 +240,12 @@ def enumerate_space(
                 check_deadline(deadline)
             if max_steps is not None and res.steps >= max_steps:
                 raise _Stop
+            while pending and pending[0][0] <= res.steps:
+                _, ancestor_depth, snapshot = pending.popleft()
+                if late_check(ancestor_depth, snapshot):
+                    raise _LateCut(ancestor_depth)
+                if deadline is not None:
+                    check_deadline(deadline)
             res.steps += 1
             mapping[u] = v
             used.add(v)
@@ -271,6 +313,7 @@ def enumerate_space(
             used.discard(v)
             mapping[u] = -1
 
+    dfs = descend if late_check is None else with_late_check
     try:
         if deadline is not None:
             check_deadline(deadline)

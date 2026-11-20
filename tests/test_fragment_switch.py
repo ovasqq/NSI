@@ -78,3 +78,35 @@ def test_budgeted_fragment_reuse_matches_original(monkeypatch):
         assert r["counts"]["unknown"] > 0
         records.append((r["steps"], r["fms"], r["counts"]))
     assert records[0] == records[1] == records[2]
+
+
+def test_delayed_proof_cuts_active_ancestor_and_restores_siblings():
+    import numpy as np
+    from search.enumerate import SearchSpace, enumerate_space
+    from search.pruning import ResidualPruner, check_fragment
+
+    query = Graph.from_edges(4, [(0, 2), (0, 3), (2, 3)], [0]*4)
+    graph = Graph.from_edges(6, [(0, 1), (0, 2), (3, 4), (4, 5), (3, 5)], [0]*6)
+    space = SearchSpace(query, graph, [np.arange(6)]*4, [0, 1, 2, 3])
+    pruner = ResidualPruner(space, "forward")
+    proofs = []
+
+    def advance(depth, mapping, used, parent):
+        if parent is None:
+            return pruner.build_domains(depth, mapping, used)
+        u = space.order[depth-1]
+        return pruner.extend_domains(parent, u, mapping[u])
+
+    def late(depth, domains):
+        if depth != 1 or check_fragment(space, domains, (2, 3), 100) is not False:
+            return False
+        assert 1 in domains  # The isolated vertex has not been assigned in the saved ancestor.
+        proofs.append(depth)
+        return True
+
+    baseline = enumerate_space(space, branch_domains=advance, store_embeddings=True)
+    adaptive = enumerate_space(space, branch_domains=advance, store_embeddings=True,
+                               late_check=late, late_depth=1, late_steps=1)
+    assert proofs
+    assert adaptive.complete and adaptive.embeddings == baseline.embeddings
+    assert adaptive.steps < baseline.steps

@@ -45,6 +45,13 @@ def select(space, domains, mode, threshold, limit):
     return "skip", ()
 
 
+def check_selected_fragment(pruner, depth, mapping, used, domains, fragment, budget, *, incremental):
+    # Restore the historical candidate order if it could affect a budgeted result.
+    if incremental and len(fragment) * prod(len(domains[u]) for u in fragment) > budget:
+        domains = pruner.build_domains(depth, mapping, used, vertices=fragment)
+    return check_fragment(pruner.space, domains, fragment, budget)
+
+
 def run(query, graph, model, args, mode, threshold, *, gate=None, observe=None, on_cut=None):
     start = perf_counter()
     space = search_space(query.graph, graph)
@@ -88,14 +95,8 @@ def run(query, graph, model, args, mode, threshold, *, gate=None, observe=None, 
                 observe(space, domains, False)
             return domains
         before = perf_counter()
-        # A bounded DFS can reach its limit at a different candidate if a
-        # frozenset was constructed in a different order. Restore historical
-        # iteration order only when the budget could actually interrupt it.
-        if strategy == "incremental" and len(fragment) * prod(len(domains[u]) for u in fragment) > args.fragment_budget:
-            domains_for_check = pruner.build_domains(depth, mapping, used, vertices=fragment)
-        else:
-            domains_for_check = domains
-        outcome = check_fragment(space, domains_for_check, fragment, args.fragment_budget)
+        outcome = check_selected_fragment(pruner, depth, mapping, used, domains, fragment,
+                                          args.fragment_budget, incremental=strategy == "incremental")
         checked = perf_counter() - before
         check_seconds += checked
         if observe is not None:
