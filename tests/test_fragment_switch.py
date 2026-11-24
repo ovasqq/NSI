@@ -34,6 +34,30 @@ def test_cheap_edge_outside_proposals(space, monkeypatch):
     assert switch.select(space, domains, "switch", 4, 12) == ("skip", ())
 
 
+def test_residual_features_include_topology_and_follow_depth(space):
+    from experiments.residual_policy import residual_features
+
+    space.order = (4, 0, 1, 2, 3)
+    extract = residual_features(space)
+    domains = {u: range(w) for u, w in enumerate([2, 3, 4, 5, 1])}
+    assert extract(0, domains) == (5, 4, 1, 5, 3, 1)
+    del domains[4]
+    assert extract(1, domains) == (4, 3, 1, 6, 3, 1)
+    domains[0] = range(5)
+    assert extract(1, domains) == (4, 3, 1, 12, 1, 0)
+
+
+def test_residual_ensemble_learns_check_or_skip_from_costs():
+    import numpy as np
+    from experiments.residual_policy import cost_action, fit_cost_ensemble
+
+    features = np.repeat([[0], [1]], 32, axis=0)
+    costs = np.repeat([[100, 10, 120], [10, 100, 120]], 32, axis=0)
+    ensemble = fit_cost_ensemble(features, costs)
+    assert cost_action(ensemble, (0,)) == "edge"
+    assert cost_action(ensemble, (1,)) == "skip"
+
+
 def test_incremental_domains_match_rebuild_across_siblings_and_prefixes():
     import numpy as np
     from search.enumerate import SearchSpace, enumerate_space

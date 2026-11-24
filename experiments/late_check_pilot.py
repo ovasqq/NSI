@@ -18,6 +18,7 @@ from experiments.deep_pruning import fingerprint
 from experiments.fms import censored_median
 from experiments.fragment_cost_oracle import continuation, query_run, reject
 from experiments.fragment_pruning import search_space
+from experiments.residual_policy import RESIDUAL_FEATURES, cost_action, fit_cost_ensemble, residual_features
 from models.hook import NeuGNReorder
 from models.pruning_controller import checkpoint_digest
 from queries.storage import load_query_set
@@ -67,7 +68,7 @@ def choose(tree, inputs):
 
 
 def learn_tree(spaces, model, args, rng):
-    inputs, costs = [], []
+    inputs, residual_inputs, costs = [], [], []
     for space in tqdm(spaces, desc="Train tree", disable=not args.progress):
         seen, sample = 0, []
 
@@ -82,6 +83,7 @@ def learn_tree(spaces, model, args, rng):
 
         query_run(space, model, args, observe=observe)
         pruner = ResidualPruner(space, "forward")
+        extract = residual_features(space) if args.early_ensemble else None
         for prefix, domains in sample:
             depth = len(prefix)
             mapping = [-1]*space.q.n
@@ -104,17 +106,23 @@ def learn_tree(spaces, model, args, rng):
                     raise AssertionError("A fragment check discarded a valid embedding")
                 remainder_us = min(5000., result.subtree_seconds*1e6) if result.complete else 5000.
             inputs.append(cheap(depth, domains))
+            if extract is not None:
+                residual_inputs.append(inputs[-1] + extract(depth, domains))
             costs.append([median(timings[action]) + (0. if cuts[action] else remainder_us)
                           for action in TREE_ACTIONS])
     if not inputs:
         raise ValueError("No eligible deep states in training")
-    return fit_tree(np.asarray(inputs), np.asarray(costs)), len(inputs)
+    x, y = np.asarray(inputs), np.asarray(costs)
+    trees = {depth: fit_tree(x, y, depth=depth) for depth in args.tree_depths}
+    return trees, len(inputs), (np.asarray(residual_inputs), y) if residual_inputs else None
 
 
-def search(space, model, args, tree, mode, *, encoder=None, observe_late=None, delay=None):
+def search(space, model, args, tree, mode, *, encoder=None, observe_late=None, delay=None,
+           logit=None, early_policy=None):
     pruner = ResidualPruner(space, "forward")
     counts = Counter()
     late_seconds = 0.
+    extract = residual_features(space) if early_policy is not None else None
 
     def advance(depth, mapping, used, parent):
         u = space.order[depth-1]
@@ -127,7 +135,11 @@ def search(space, model, args, tree, mode, *, encoder=None, observe_late=None, d
         elif mode == "switch":
             action = "switch"
         else:
-            action = choose(tree, cheap(depth, domains))
+            inputs = cheap(depth, domains)
+            if early_policy is None:
+                action = choose(tree, inputs)
+            else:
+                action = early_policy(inputs + extract(depth, domains))
         counts["early_"+action] += 1
         if reject(pruner, depth, mapping, used, domains, action, args):
             return None
@@ -142,7 +154,8 @@ def search(space, model, args, tree, mode, *, encoder=None, observe_late=None, d
             return False
         if encoder is not None:
             counts["model_calls"] += 1
-            if encoder(*features(space, domains, True)).item() < args.logit:
+            threshold = args.logit if logit is None else logit
+            if encoder(*features(space, domains, True)).item() < threshold:
                 late_seconds += perf_counter()-start
                 return False
         counts["strong_checks"] += 1
@@ -155,7 +168,7 @@ def search(space, model, args, tree, mode, *, encoder=None, observe_late=None, d
     start = perf_counter()
     hook = NeuGNReorder(model, space.q, args.depth, args.device)
     callbacks = {} if mode == "neugn" else {"branch_domains": advance}
-    if mode == "tree_late_nn" or observe_late is not None:
+    if mode in ("tree_late_always", "tree_late_nn") or observe_late is not None:
         callbacks.update(late_check=late, late_steps=args.late_steps if delay is None else delay,
                          late_depth=args.depth)
     result = enumerate_space(space, hook, max_matches=1, max_steps=args.budget, **callbacks)
@@ -243,6 +256,93 @@ def summarize_trials(records, modes):
     return summary
 
 
+def select_tree(validation, trees, graph, model, args, rng):
+    policies = {"switch": None, **{f"depth_{depth}": tree for depth, tree in trees.items()}}
+    records = []
+    for size, density, index, query in tqdm(validation, desc="Validate tree depth", disable=not args.progress):
+        space = search_space(query.graph, graph)
+        order = list(policies)
+        rng.shuffle(order)
+        record = dict(size=size, density=density, index=index)
+        for name in order:
+            mode = "switch" if name == "switch" else "tree"
+            record[name] = [search(space, model, args, policies[name], mode)]
+        records.append(record)
+
+    summary = summarize_trials(records, policies)
+    baseline_solved = summary["switch"]["solved"]
+
+    def rank(depth):
+        metrics = summary[f"depth_{depth}"]
+        return max(0, baseline_solved - metrics["solved"]), metrics["seconds"], depth
+
+    depth = min(trees, key=rank)
+    return depth, dict(selected_depth=depth, matched_switch_coverage=rank(depth)[0] == 0,
+                       summary=summary, records=records)
+
+
+def compare_paired(records, modes, reference="switch"):
+    comparisons = {}
+    for mode in modes:
+        if mode == reference:
+            continue
+        common, gains, losses, neither = [], [], [], []
+        for record in records:
+            trial, baseline = record[mode], record[reference]
+            key = [record["size"], record["density"], record["index"]]
+            trial_solved, baseline_solved = trial[0]["solved"], baseline[0]["solved"]
+            if trial_solved and baseline_solved:
+                common.append((median(t["seconds"] for t in trial),
+                               median(t["seconds"] for t in baseline)))
+            elif trial_solved:
+                gains.append(key)
+            elif baseline_solved:
+                losses.append(key)
+            else:
+                neither.append((median(t["seconds"] for t in trial),
+                                median(t["seconds"] for t in baseline)))
+        comparisons[mode] = dict(
+            common=len(common), only_mode=gains, only_reference=losses, neither=len(neither),
+            common_mode_seconds=sum(a for a, _ in common),
+            common_reference_seconds=sum(b for _, b in common),
+            neither_mode_seconds=sum(a for a, _ in neither),
+            neither_reference_seconds=sum(b for _, b in neither),
+            median_paired_delta_ms=1000 * median(a-b for a, b in common) if common else None,
+        )
+    return comparisons
+
+
+def select_logit(validation, graph, model, tree, encoder, args, rng):
+    thresholds = args.logits if args.logits is not None else [args.logit]
+    candidates = {f"logit_{threshold:g}": threshold for threshold in thresholds}
+    modes = ("switch", "tree", "tree_late_always", *candidates)
+    records = []
+    for size, density, index, query in tqdm(validation, desc="Calibrate late gate",
+                                            disable=not args.progress):
+        space = search_space(query.graph, graph)
+        order = list(modes)
+        rng.shuffle(order)
+        record = dict(size=size, density=density, index=index)
+        for name in order:
+            if name in candidates:
+                trial = search(space, model, args, tree, "tree_late_nn",
+                               encoder=encoder, logit=candidates[name])
+            else:
+                trial = search(space, model, args, tree, name)
+            record[name] = [trial]
+        records.append(record)
+    summary = summarize_trials(records, modes)
+    comparisons = compare_paired(records, modes)
+
+    def rank(name):
+        deficit = max(0, summary["switch"]["solved"] - summary[name]["solved"])
+        return deficit, summary[name]["seconds"], len(comparisons[name]["only_reference"])
+
+    selected = min(candidates, key=rank)
+    return candidates[selected], dict(selected=selected, thresholds=candidates, summary=summary,
+                                      paired_vs_switch=comparisons, records=records)
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     for key in ("checkpoint","query-dir","out"):
@@ -255,8 +355,13 @@ def main():
                           late_samples=24,min_class=8,
                           branch_budget=2000,late_steps=128,repeats=3,epochs=6,seed=19).items():
         p.add_argument("--"+key.replace("_","-"),type=int,default=value)
+    p.add_argument("--tree-depths", type=int, nargs="+", default=[1, 2, 3])
+    p.add_argument("--early-ensemble", action="store_true",
+                   help="Also compare a tree and a cost ensemble with residual query features.")
     p.add_argument("--progress", action=argparse.BooleanOptionalAction, default=True)
     p.add_argument("--logit",type=float,default=0.)
+    p.add_argument("--logits", type=float, nargs="+",
+                   help="Thresholds to compare on validation. Otherwise use --logit.")
     p.add_argument("--branch-seconds",type=float,default=.05)
     args=p.parse_args()
     if min(args.train_queries, args.queries, args.samples, args.late_samples, args.min_class,
@@ -267,8 +372,14 @@ def main():
         p.error("use distinct query sizes of at least two vertices")
     if max(args.sizes) < args.depth + 2:
         p.error("include a query size with at least two unassigned vertices after the check depth")
-    if args.test_offset < args.train_offset+args.train_queries or args.train_offset < 0:
-        p.error("training and test queries must be disjoint")
+    if min(args.tree_depths) < 1 or len(args.tree_depths) != len(set(args.tree_depths)):
+        p.error("use distinct positive tree depths")
+    thresholds = args.logits if args.logits is not None else [args.logit]
+    if not all(map(isfinite, thresholds)) or len({f"{v:g}" for v in thresholds}) != len(thresholds):
+        p.error("use distinct finite logit thresholds")
+    train_end = args.train_offset + args.train_queries
+    if args.test_offset <= train_end or args.train_offset < 0:
+        p.error("leave whole validation queries between training and test offsets")
     torch.set_num_threads(1)
     torch.manual_seed(args.seed)
     rng=Random(args.seed)
@@ -286,11 +397,19 @@ def main():
                 p.error(f"incompatible query set: {path}")
             groups[size,density] = queries
             query_hashes[path.name] = checkpoint_digest(path)
-    train, test = [], []
+    train, validation, test = [], [], []
     for (size, density), queries in groups.items():
         for i in range(args.test_offset, args.test_offset+args.queries):
             test.append((size, density, i, queries[i]))
     seen = {fingerprint(q) for _,_,_,q in test}
+    for (size, density), queries in groups.items():
+        if size >= args.depth + 2:
+            for i in range(train_end, args.test_offset):
+                query = queries[i]
+                key = fingerprint(query)
+                if key not in seen:
+                    seen.add(key)
+                    validation.append((size, density, i, query))
     for (size, density), queries in groups.items():
         if size < args.depth + 2:
             continue
@@ -300,26 +419,53 @@ def main():
             if key not in seen:
                 seen.add(key)
                 train.append(search_space(query.graph, graph))
-    if not train:
-        p.error("no training queries remain after deduplication")
+    if not train or not validation:
+        p.error("no training or validation queries remain after deduplication")
     args.out.mkdir(parents=True,exist_ok=True)
     if any(args.out.iterdir()):
         p.error("use an empty output directory")
     with torch.no_grad():
-        tree,tree_samples=learn_tree(train,model,args,rng)
+        trees, tree_samples, residual_training = learn_tree(train, model, args, rng)
+        tree_depth, validation_result = select_tree(validation, trees, graph, model, args, rng)
+        tree = trees[tree_depth]
+        (args.out/"validation.json").write_text(json.dumps(validation_result, indent=2)+"\n")
+        print(f"Selected tree depth {tree_depth}; validation matches switch coverage: "
+              f"{validation_result['matched_switch_coverage']}", flush=True)
         encoder, collection = train_encoder(train, graph, model, tree, args, rng)
         torch.save(encoder.state_dict(), args.out/"mini_transformer.pt")
-        modes = ("neugn", "switch", "tree", "tree_late_nn")
+        logit, calibration = select_logit(validation, graph, model, tree, encoder, args, rng)
+        (args.out/"late_calibration.json").write_text(json.dumps(calibration, indent=2)+"\n")
+        print(f"Selected late gate logit {logit:g}", flush=True)
+        modes = ("neugn", "switch", "tree", "tree_late_always", "tree_late_nn")
+        early_policies = {}
+        if residual_training is not None:
+            residual_tree = fit_tree(*residual_training, depth=tree_depth)
+            residual_ensemble = fit_cost_ensemble(*residual_training)
+            early_policies = {
+                "residual_tree": lambda inputs: choose(residual_tree, inputs),
+                "residual_ensemble": lambda inputs: cost_action(residual_ensemble, inputs),
+            }
+            modes = (*modes, *early_policies, *(name + "_late_nn" for name in early_policies))
+            (args.out/"early_policies.json").write_text(json.dumps(dict(
+                residual_features=RESIDUAL_FEATURES, tree_depth=tree_depth,
+                residual_tree=residual_tree, residual_ensemble=residual_ensemble,
+            ), indent=2)+"\n")
         records = []
-        for size, density, index, query in tqdm(test, desc="Test four modes", disable=not args.progress):
+        for size, density, index, query in tqdm(test, desc=f"Test {len(modes)} modes",
+                                               disable=not args.progress):
             space = search_space(query.graph, graph)
             trials = {mode: [] for mode in modes}
             for _ in range(args.repeats):
                 order = list(modes)
                 rng.shuffle(order)
                 for mode in order:
-                    trials[mode].append(search(space, model, args, tree, mode,
-                                              encoder=encoder if mode=="tree_late_nn" else None))
+                    late = mode.endswith("_late_nn")
+                    policy_name = mode.removesuffix("_late_nn") if late else mode
+                    trials[mode].append(search(
+                        space, model, args, tree, "tree_late_nn" if late else mode,
+                        encoder=encoder if late else None, logit=logit,
+                        early_policy=early_policies.get(policy_name),
+                    ))
             records.append(dict(size=size,density=density,index=index,**trials))
     by_size = {
         n: summarize_trials([r for r in records if r["size"] == n], modes)
@@ -332,9 +478,22 @@ def main():
         for n, density in groups
     }
     result=dict(params={k:str(v) for k,v in vars(args).items()},tree=tree,tree_samples=tree_samples,
+                tree_depth=tree_depth, validation={k: v for k, v in validation_result.items() if k != "records"},
+                late_logit=logit, paired_vs_switch=compare_paired(records, modes),
+                paired_late_nn_vs_always=compare_paired(records, ("tree_late_nn",),
+                                                       reference="tree_late_always")["tree_late_nn"],
                 collection=collection, summary=summarize_trials(records, modes),
                 by_size=by_size, by_group=by_group, records=records, train_queries=len(train),
                 checkpoint_sha256=checkpoint_digest(args.checkpoint), query_sha256=query_hashes)
+    if early_policies:
+        result["paired_early_ablation"] = {
+            mode: compare_paired(records, (mode,), reference)[mode]
+            for mode, reference in (
+                ("residual_tree", "tree"), ("residual_ensemble", "residual_tree"),
+                ("residual_tree_late_nn", "tree_late_nn"),
+                ("residual_ensemble_late_nn", "residual_tree_late_nn"),
+            )
+        }
     (args.out/"results.json").write_text(json.dumps(result,indent=2)+"\n")
     print(json.dumps({k:v for k,v in result.items() if k not in ("records", "by_group")},indent=2))
 
