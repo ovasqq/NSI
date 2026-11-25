@@ -19,10 +19,11 @@ from search.graph import Graph
 
 
 class NeuGNReorder:
-    def __init__(self, model: NeuGN, q: Graph, max_depth: int = 10,
+    def __init__(self, model: NeuGN, q: Graph, max_depth: int | None = 10,
                  device: str | torch.device = "cpu", shift: int = 0,
                  *, capture_state: bool = False, capture_scores: bool = False,
-                 check_head: torch.nn.Module | None = None, check_threshold: float = 0.0):
+                 check_head: torch.nn.Module | None = None, check_threshold: float = 0.0,
+                 domain_only: bool = False):
         self.model, self.max_depth, self.device, self.shift = model, max_depth, device, shift
         self.num_g = model.cfg.num_g
         # Fixed per query: Euler sequence from vertex 0, shift 0.
@@ -32,6 +33,7 @@ class NeuGNReorder:
         self.capture_state = capture_state
         self.capture_scores = capture_scores or capture_state
         self.check_head, self.check_threshold = check_head, check_threshold
+        self.domain_only = domain_only
         self.check_decisions: dict[int, list[bool]] = {}
         self.gate_decisions = self.gate_skips = 0
         # Sibling candidates share a parent anchor. Descending only changes deeper entries.
@@ -46,11 +48,15 @@ class NeuGNReorder:
 
     def scores(self, mapping: list[int], u: int, cands: list[int]) -> torch.Tensor:
         with torch.inference_mode():
+            if self.domain_only:
+                state = self.model.state_vector(self._batch(mapping, u), self.h_q)
+                indices = torch.tensor(cands, device=state.device)
+                return self.model.candidate_logits(state, indices)[0].cpu()
             logits = self.model(self._batch(mapping, u), self.h_q)[0]
             return logits[torch.tensor(cands, device=logits.device)].cpu()
 
     def __call__(self, depth: int, u: int, mapping: list[int], cands: list[int]) -> list[int]:
-        if depth >= self.max_depth:
+        if self.max_depth is not None and depth >= self.max_depth:
             return cands
         t0 = time.perf_counter()
         state = None
@@ -59,16 +65,19 @@ class NeuGNReorder:
                 indices = torch.tensor([cands], device=self.device)
                 logits, checks = self.model.rank_and_check(
                     self._batch(mapping, u), indices, self.check_head, self.h_q,
+                    domain_only=self.domain_only,
                 )
+                ranks = logits if self.domain_only else logits.gather(1, indices)
                 s, decisions = torch.stack(
-                    (logits.gather(1, indices)[0], (checks[0] > self.check_threshold)),
+                    (ranks[0], (checks[0] > self.check_threshold)),
                 ).cpu()
         elif self.capture_state:
             with torch.inference_mode():
                 state = self.model.state_vector(self._batch(mapping, u), self.h_q)
-                logits = self.model.out(state)[0]
-                indices = torch.tensor(cands, device=logits.device)
-                s = logits[indices].cpu()
+                indices = torch.tensor(cands, device=state.device)
+                ranks = (self.model.candidate_logits(state, indices) if self.domain_only
+                         else self.model.out(state)[:, indices])
+                s = ranks[0].cpu()
                 state = state[0].cpu()
         else:
             s = self.scores(mapping, u, cands)

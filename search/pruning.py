@@ -191,9 +191,10 @@ class ResidualPruner:
         self.stats.record_stage("matching", started)
         return covered
 
-    def check_arcs(self, domains: Domains) -> bool:
+    def check_arcs(self, domains: Domains, *, parent: Domains | None = None,
+                   residues: dict[tuple[int, int], dict[int, int]] | None = None) -> bool:
         started = perf_counter()
-        consistent = self._propagate_arcs(domains)
+        consistent = self._propagate_arcs(domains, parent=parent, residues=residues)
         self.stats.record_stage("arc_consistency", started)
         return consistent
 
@@ -206,16 +207,32 @@ class ResidualPruner:
             return "all_different"
         return None
 
-    def _propagate_arcs(self, domains: dict[int, frozenset[int]]) -> bool:
+    def _propagate_arcs(self, domains: Domains, *, parent: Domains | None = None,
+                        residues: dict[tuple[int, int], dict[int, int]] | None = None) -> bool:
         # AC-3: a candidate must have at least one support across every query edge.
         g_adj = self.space.g.adj_set
         q_adj = self.space.q.adj_set
-        arcs = deque((u, w) for u in domains for w in q_adj[u] if w in domains)
+        arcs = deque((u, w) for u in domains for w in q_adj[u]
+                     if w in domains and (parent is None or domains[w] != parent[w]))
         while arcs:
             u, w = arcs.popleft()
             old = domains[u]
             support = domains[w]
-            revised = frozenset(v for v in old if not g_adj[v].isdisjoint(support))
+            if residues is None:
+                revised = frozenset(v for v in old if not g_adj[v].isdisjoint(support))
+            else:
+                saved = residues.setdefault((u, w), {})
+                keep = []
+                for v in old:
+                    if saved.get(v, -1) in support:
+                        keep.append(v)
+                    else:
+                        witness = next((x for x in g_adj[v] if x in support), None)
+                        if witness is not None:
+                            if len(saved) < 256 or v in saved:
+                                saved[v] = witness
+                            keep.append(v)
+                revised = frozenset(keep)
             if not revised:
                 return False
             if len(revised) < len(old):
@@ -314,7 +331,27 @@ def check_fragment(space: SearchSpace, domains: Domains, vertices: tuple[int, ..
 
 def _covers_all(domains: dict[int, frozenset[int]]) -> bool:
     """Is there a bipartite matching that covers every remaining query vertex?"""
-    owner: dict[int, int] = {}
+    return _match_domains(domains, explain=False) is True
+
+
+def hall_conflict(domains: Domains) -> tuple[tuple[int, ...], frozenset[int]] | None:
+    """Return a Hall-deficient set of variables and its candidate union, if any."""
+    result = _match_domains(domains, explain=True)
+    return result if isinstance(result, tuple) else None
+
+
+def matching_with_reuse(domains: Domains, previous: dict[int, int] | None):
+    """Repair a parent matching and return either a matching or a Hall witness."""
+    owner = {v: u for u, v in (previous or {}).items() if u in domains and v in domains[u]}
+    result = _match_domains(domains, explain=True, owner=owner)
+    if result is True:
+        return {u: v for v, u in owner.items()}, None
+    return None, result
+
+
+def _match_domains(domains: Domains, *, explain: bool, owner: dict[int, int] | None = None):
+    owner = {} if owner is None else owner
+    covered = set(owner.values()) if owner else ()
 
     def augment(u: int, seen: set[int]) -> bool:
         for v in domains[u]:
@@ -326,4 +363,14 @@ def _covers_all(domains: dict[int, frozenset[int]]) -> bool:
                 return True
         return False
 
-    return all(augment(u, set()) for u in sorted(domains, key=lambda u: (len(domains[u]), u)))
+    for u in sorted(domains, key=lambda u: (len(domains[u]), u)):
+        if u in covered:
+            continue
+        seen: set[int] = set()
+        if not augment(u, seen):
+            if not explain:
+                return False
+            # The failed augment visits only occupied images. Their owners
+            # and the unmatched root share exactly this candidate union.
+            return (u, *(owner[v] for v in sorted(seen))), frozenset(seen)
+    return True

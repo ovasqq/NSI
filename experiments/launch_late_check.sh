@@ -6,7 +6,13 @@ py="${PYTHON:-.venv-gpu/bin/python}"
 root="${RUN_ROOT:-/raid/ovasqq/neugn-runs}"
 source_run="${SOURCE_RUN:-$root/wikics_deep_ac3_20261118_140911}"
 checkpoint="${CHECKPOINT:-checkpoints/wikics/paper1000_seed0/model.pt}"
-out=$(mktemp -d "$root/wikics_late_check_XXXXXXXX")
+experiment="${EXPERIMENT:-late_check_pilot}"
+case "$experiment" in
+  late_check_pilot) label=late_check ;;
+  joint_search) label=joint_search ;;
+  *) printf 'Unknown experiment: %s\n' "$experiment" >&2; exit 2 ;;
+esac
+out=$(mktemp -d "$root/wikics_${label}_XXXXXXXX")
 printf 'Results %s\n' "$out"
 (
   git rev-parse HEAD
@@ -23,7 +29,7 @@ if checkpoint != json.loads(Path(sys.argv[2]).read_text())["checkpoint_digest"]:
     raise SystemExit("Checkpoint differs from source protocol")
 print(torch.cuda.get_device_name(0), torch.ones(1, device="cuda:0").item(), flush=True)
 PY
-  "$py" -u -m experiments.late_check_pilot --graph wikics --device cuda:0 \
+  "$py" -u -m "experiments.$experiment" --graph wikics --device cuda:0 \
     --checkpoint "$checkpoint" --query-dir "$source_run/queries" --out "$out/results" "$@"
 ) 2>&1 | tee "$out/run.log"
 tar -czf "$out.tar.gz.partial" -C "$out" results run.log

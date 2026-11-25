@@ -24,13 +24,16 @@ from train.train_neugn import load_model
 ACTIONS = ("switch", "skip", "edge", "manual")
 
 
-def reject(pruner, depth, mapping, used, domains, action, args):
+def reject(pruner, depth, mapping, used, domains, action, args, *, on_conflict=None):
     if action == "skip":
         return False
     _, fragment = select(pruner.space, domains, action, args.threshold, args.proposals)
-    return bool(fragment) and check_selected_fragment(
+    cut = bool(fragment) and check_selected_fragment(
         pruner, depth, mapping, used, domains, fragment, args.fragment_budget, incremental=True
     ) is False
+    if cut and on_conflict is not None:
+        on_conflict(fragment, domains)
+    return cut
 
 
 def query_run(space, model, args, *, observe=None, choices=None, record_decision=None):

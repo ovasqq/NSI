@@ -134,3 +134,66 @@ def test_delayed_proof_cuts_active_ancestor_and_restores_siblings():
     assert proofs
     assert adaptive.complete and adaptive.embeddings == baseline.embeddings
     assert adaptive.steps < baseline.steps
+
+
+def test_late_observer_measures_remaining_work_without_changing_search():
+    import numpy as np
+    from search.enumerate import SearchSpace, enumerate_space
+    from search.pruning import ResidualPruner
+
+    query = Graph.from_edges(4, [], [0]*4)
+    graph = Graph.from_edges(4, [], [0]*4)
+    space = SearchSpace(query, graph, [np.arange(4)]*4, [0, 1, 2, 3])
+    pruner = ResidualPruner(space, "forward")
+
+    def advance(depth, mapping, used, parent):
+        if parent is None:
+            return pruner.build_domains(depth, mapping, used)
+        u = space.order[depth-1]
+        return pruner.extend_domains(parent, u, mapping[u])
+
+    finished = []
+
+    def observe(depth, domains, step):
+        assert len(domains) == 4-depth
+
+        def finish(end_step, complete):
+            finished.append((depth, end_step-step, complete))
+
+        return finish
+
+    for budget in (3, None):
+        finished.clear()
+        baseline = enumerate_space(space, branch_domains=advance, max_steps=budget)
+        sampled = enumerate_space(space, branch_domains=advance, max_steps=budget,
+                                  late_observer=observe, late_depth=1, late_steps=1)
+        assert (sampled.steps, sampled.match_steps) == (baseline.steps, baseline.match_steps)
+        assert finished and all(remaining > 0 for _, remaining, _ in finished)
+        assert all(complete == (budget is None) for _, _, complete in finished)
+
+
+def test_zero_delay_observes_branch_before_ranking():
+    import numpy as np
+    from search.enumerate import SearchSpace, enumerate_space
+    from search.pruning import ResidualPruner
+
+    graph = Graph.from_edges(4, [], [0]*4)
+    space = SearchSpace(graph, graph, [np.arange(4)]*4, [0, 1, 2, 3])
+    pruner = ResidualPruner(space, "forward")
+    events = []
+
+    def advance(depth, mapping, used, parent):
+        return pruner.build_domains(depth, mapping, used)
+
+    def observe(depth, domains, step):
+        events.append(("observe", depth, step))
+        return lambda end, completed: events.append(("finish", depth, end-step, completed))
+
+    def rank(depth, vertex, mapping, candidates):
+        events.append(("rank", depth))
+        return candidates
+
+    result = enumerate_space(space, rank, branch_domains=advance, late_observer=observe,
+                             late_depth=1, late_steps=0, max_steps=2)
+    assert result.steps == 2 and not result.complete
+    assert events == [("rank", 0), ("observe", 1, 1), ("rank", 1), ("finish", 1, 1, False)]

@@ -17,8 +17,10 @@ every call, so a hook can never prune the search (completeness).
 
 from __future__ import annotations
 
+from bisect import bisect_right
 from collections import deque
 from dataclasses import dataclass, field
+from operator import itemgetter
 from time import perf_counter
 from typing import Callable, Sequence
 
@@ -50,6 +52,8 @@ PruningPolicy = Callable[[BranchState], bool]
 # returned from this branch or found a match before being interrupted.
 BranchObserver = Callable[[BranchState, list[int], set[int]], Callable[[bool], None] | None]
 BranchVisitor = Callable[[BranchState, list[int]], None]
+# The returned callback receives the final step and whether the frame finished.
+LateObserver = Callable[[int, Domains, int], Callable[[int, bool], None] | None]
 
 
 @dataclass
@@ -160,6 +164,9 @@ def enumerate_space(
     late_check: Callable[[int, Domains], bool] | None = None,
     late_steps: int = 128,
     late_depth: int = 10,
+    late_observer: LateObserver | None = None,
+    late_schedule: Callable[[int, Domains], int | None] | None = None,
+    backjump_depth: Callable[[int], int | None] | None = None,
 ) -> SearchResult:
     """Skip pruning for the first prune_after_steps attempts. The optional
     deadline uses perf_counter(). A prefix contains already assigned data
@@ -168,11 +175,18 @@ def enumerate_space(
     With late_check, each eligible DFS frame saves its entry domains and
     schedules one check before its next step after late_steps descendant
     attempts. Returning True must prove the saved ancestor has no matches.
+    Zero delay runs at frame entry, before candidate ranking.
+    A schedule can supply a delay per frame or return None to skip it.
+    Backjumps require a proof for the named active ancestor.
     """
     # The late callback must prove a contradiction for the entire supplied snapshot.
-    if late_check is not None and (branch_domains is None or late_steps < 1 or late_depth < 1):
-        raise ValueError("a late check needs incremental domains and positive depth and step limits")
+    use_late = late_check is not None or late_observer is not None
+    if late_schedule is not None and not use_late:
+        raise ValueError("a schedule requires a check or observer")
+    if use_late and (branch_domains is None or late_steps < 0 or late_depth < 1):
+        raise ValueError("a scheduled check needs incremental domains, nonnegative delay and positive depth")
     pending: deque[tuple[int, int, Domains]] = deque()
+    late_finishes: dict[int, Callable[[int, bool], None]] = {}
     # A domain-producing callback may reject with None. Its accepted snapshot
     # belongs to this child only; siblings continue from the parent's snapshot.
     if branch_domains is not None and branch_check is not None:
@@ -209,22 +223,51 @@ def enumerate_space(
             raise _Stop
 
     def with_late_check(i: int, domains: Domains | None = None) -> None:
-        if i < late_depth or domains is None or len(domains) < 2:
-            descend(i, domains)
-            return
-        ticket = (res.steps + late_steps, i, domains)
-        pending.append(ticket)
+        ticket = None
+        complete = False
         try:
-            descend(i, domains)
+            delay = None
+            if use_late and i >= late_depth and domains is not None and len(domains) >= 2:
+                delay = late_steps if late_schedule is None else late_schedule(i, domains)
+            if delay == 0:
+                if max_steps is not None and res.steps >= max_steps:
+                    raise _Stop
+                if deadline is not None:
+                    check_deadline(deadline)
+                finish = None if late_observer is None else late_observer(i, domains, res.steps)
+                if finish is not None:
+                    late_finishes[i] = finish
+                if late_check is None or not late_check(i, domains):
+                    descend(i, domains)
+            else:
+                if delay is not None:
+                    if delay < 0:
+                        raise ValueError("scheduled delay must be nonnegative")
+                    ticket = (res.steps + delay, i, domains)
+                    if late_schedule is None:
+                        pending.append(ticket)
+                    else:
+                        pending.insert(bisect_right(pending, ticket[0], key=itemgetter(0)), ticket)
+                descend(i, domains)
+            complete = True
         except _LateCut as cut:
             if cut.depth != i:
                 raise
+            complete = True
             for vertex in order[i:]:
                 used.discard(mapping[vertex])
                 mapping[vertex] = -1
         finally:
-            if pending and pending[-1] is ticket:
-                pending.pop()
+            if ticket is not None:
+                if late_schedule is None:
+                    if pending and pending[-1] is ticket:
+                        pending.pop()
+                elif ticket in pending:
+                    pending.remove(ticket)
+            if late_observer is not None:
+                finish = late_finishes.pop(i, None)
+                if finish is not None:
+                    finish(res.steps, complete)
 
     def descend(i: int, domains: Domains | None = None) -> None:
         nonlocal backtracks, last_deadend_steps
@@ -242,7 +285,11 @@ def enumerate_space(
                 raise _Stop
             while pending and pending[0][0] <= res.steps:
                 _, ancestor_depth, snapshot = pending.popleft()
-                if late_check(ancestor_depth, snapshot):
+                if late_observer is not None:
+                    finish = late_observer(ancestor_depth, snapshot, res.steps)
+                    if finish is not None:
+                        late_finishes[ancestor_depth] = finish
+                if late_check is not None and late_check(ancestor_depth, snapshot):
                     raise _LateCut(ancestor_depth)
                 if deadline is not None:
                     check_deadline(deadline)
@@ -310,10 +357,16 @@ def enumerate_space(
                 elif track_history:
                     backtracks += 1
                     last_deadend_steps = 0
+                if rejected and backjump_depth is not None:
+                    ancestor = backjump_depth(i)
+                    if ancestor is not None:
+                        if not 0 <= ancestor <= i:
+                            raise ValueError("backjump must target an active ancestor")
+                        raise _LateCut(ancestor)
             used.discard(v)
             mapping[u] = -1
 
-    dfs = descend if late_check is None else with_late_check
+    dfs = with_late_check if use_late or backjump_depth is not None else descend
     try:
         if deadline is not None:
             check_deadline(deadline)

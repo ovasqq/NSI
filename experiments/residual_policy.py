@@ -45,7 +45,7 @@ def residual_features(space, small_domain=4):
 
 
 def fit_cost_ensemble(features, costs, rounds=8, min_leaf=16, learning_rate=.25):
-    """Boost shared decision stumps on edge and fragment costs relative to skip."""
+    """Boost shared decision stumps on action costs relative to skip."""
     targets = costs[:, 1:] - costs[:, :1]
     base = targets.mean(axis=0)
     residual = targets - base
@@ -55,7 +55,7 @@ def fit_cost_ensemble(features, costs, rounds=8, min_leaf=16, learning_rate=.25)
         for pivot in pivots:
             left = values <= pivot
             if min(left.sum(), (~left).sum()) >= min_leaf:
-                splits.append((column, int(pivot), left))
+                splits.append((column, float(pivot), left))
 
     stumps = []
     for _ in range(rounds):
@@ -77,6 +77,16 @@ def fit_cost_ensemble(features, costs, rounds=8, min_leaf=16, learning_rate=.25)
         residual[~left] -= right_step
         stumps.append((column, pivot, left_step.tolist(), right_step.tolist()))
     return base.tolist(), stumps
+
+
+def predict_cost_deltas(ensemble, features):
+    base, stumps = ensemble
+    deltas = list(base)
+    for column, pivot, left, right in stumps:
+        correction = left if features[column] <= pivot else right
+        for index, step in enumerate(correction):
+            deltas[index] += step
+    return deltas
 
 
 def cost_action(ensemble, features):

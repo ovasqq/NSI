@@ -12,6 +12,7 @@ from dataclasses import asdict, dataclass
 
 import torch
 from torch import nn
+from torch.nn import functional as F
 
 from models.encoding import NUM_QVERT
 
@@ -87,13 +88,21 @@ class NeuGN(nn.Module):
 
     def rank_and_check(
         self, batch, candidates: torch.Tensor, check_head: nn.Module,
-        h_q: torch.Tensor | None = None,
+        h_q: torch.Tensor | None = None, *, domain_only: bool = False,
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """Ranking logits over G and check logits for the requested (B, C) IDs."""
         state = self.state_vector(batch, h_q)
-        ranks = self.out(state)
+        ranks = self.candidate_logits(state, candidates) if domain_only else self.out(state)
         checks = check_head(state, self.content_emb(candidates))
         return ranks, checks
+
+    def candidate_logits(self, state: torch.Tensor, candidates: torch.Tensor) -> torch.Tensor:
+        """Project onto shared (C,) indices or batched (B, C) indices."""
+        if candidates.ndim == 1:
+            return F.linear(state, self.out.weight.index_select(0, candidates),
+                            self.out.bias.index_select(0, candidates))
+        weights = self.out.weight[candidates]
+        return torch.bmm(weights, state.unsqueeze(-1)).squeeze(-1) + self.out.bias[candidates]
 
     def state_vector(self, batch, h_q: torch.Tensor | None = None) -> torch.Tensor:
         """Transformer anchor before the vertex-ranking projection."""
