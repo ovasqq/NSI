@@ -48,9 +48,22 @@ def probe(snapshot, stream, batch_size, workers, device, warmup, examples, repea
                 if device.type == "cuda" else None)
 
 
+def latest_dblp_checkpoint(checkpoints):
+    root = checkpoints / "dblp_proxy15"
+    candidates = []
+    for pattern in ("dblp_joint_*/model.pt", "dblp_batch_sweep_*/model.pt"):
+        for path in root.glob(pattern):
+            if path.is_file():
+                info = path.stat()
+                if info.st_size:
+                    candidates.append((info.st_mtime_ns, path))
+    return max(candidates)[1] if candidates else None
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--checkpoint", type=Path, required=True)
+    p.add_argument("--checkpoint", type=Path,
+                   help="Source model.pt. Default: latest published DBLP training checkpoint.")
     p.add_argument("--out", type=Path, required=True)
     p.add_argument("--device", default="cuda:0")
     p.add_argument("--batches", nargs="+", type=int, default=[64, 128, 256])
@@ -71,6 +84,13 @@ def main():
         p.error("--continue-to and --run must be supplied together")
     if args.run is not None and (Path(args.run).name != args.run or args.run in (".", "..")):
         p.error("--run must be a single new directory name")
+    if args.checkpoint is None:
+        args.checkpoint = latest_dblp_checkpoint(CKPT_DIR)
+        if args.checkpoint is None:
+            p.error(f"no saved DBLP checkpoint under {CKPT_DIR / 'dblp_proxy15'}; pass --checkpoint")
+        print(f"Selected DBLP checkpoint: {args.checkpoint}", flush=True)
+    if not args.checkpoint.is_file() or not args.checkpoint.stat().st_size:
+        p.error(f"checkpoint missing or empty: {args.checkpoint}")
     device = pick_device(args.device)
     if device.type == "cuda" and not torch.cuda.is_available():
         p.error("CUDA is unavailable")

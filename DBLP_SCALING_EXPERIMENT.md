@@ -83,18 +83,17 @@ DBLP по умолчанию использует пакетную CUDA AC-3 п�
 
 `experiments.neugn_batch_sweep` сравнивает батчи 64, 128 и 256 на одном сохранённом чекпойнте. Каждая проба заново загружает веса и Adam. По умолчанию она прогревает 1 024 примера и измеряет два отрезка по 8 192 примера, включая генерацию, перенос, полный шаг обучения и метрики. В `batch_sweep.json` записываются время, пропускная способность, пик памяти PyTorch и исход каждой пробы. Батч с CUDA OOM пропускается.
 
-Запускайте на свободной GPU после остановки или завершения исходного процесса. Исходный чекпойнт копируется или фиксируется ссылкой на опубликованный файл. Пробные шаги живут только в памяти. Без `--continue-to` скрипт заканчивает работу после замеров.
+Запускайте на свободной GPU после остановки или завершения исходного процесса. По умолчанию скрипт выбирает последний по времени записи непустой `model.pt` среди запусков `dblp_joint_*` и продолжений `dblp_batch_sweep_*`. Выбранный путь выводится в журнал. Чтобы взять конкретный чекпойнт, передайте `--checkpoint /path/to/model.pt`. Исходный чекпойнт копируется или фиксируется ссылкой на опубликованный файл. Пробные шаги живут только в памяти. Без `--continue-to` скрипт заканчивает работу после замеров.
 
 ```bash
 GPU_INDEX=0
 GPU_UUID=$(nvidia-smi -i "$GPU_INDEX" --query-gpu=uuid --format=csv,noheader)
-SOURCE=checkpoints/dblp_proxy15/dblp_joint_XXXXXXXX/model.pt
 RUN_ROOT=/raid/ovasqq/neugn-runs
 OUT=$(mktemp -d "$RUN_ROOT/dblp_batch_sweep_XXXXXXXX")
 
 CUDA_VISIBLE_DEVICES="$GPU_UUID" OMP_NUM_THREADS=1 MKL_NUM_THREADS=1 OPENBLAS_NUM_THREADS=1 \
   .venv-gpu/bin/python -u -m experiments.neugn_batch_sweep \
-  --checkpoint "$SOURCE" --out "$OUT/probe" --batches 64 128 256 \
+  --out "$OUT/probe" --batches 64 128 256 \
   --continue-to 30 --run "$(basename "$OUT")" 2>&1 | tee "$OUT/run.log"
 ```
 
