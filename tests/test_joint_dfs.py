@@ -176,3 +176,57 @@ def test_replay_same_unsat_prefix_and_censoring():
     assert checked["direct_cuts"] == checked["closed_immediate"] == 1
     args.budget = 1
     assert run(space, None, data, args, "joint_rank", prefix=(0,))["outcome"] == "step_limit"
+
+
+def test_shared_arc_labels_match_cpu_and_batched_continuations():
+    from random import Random
+
+    from experiments.joint_search import arc_labels
+    from search.batched_arcs import sparse_adjacency
+
+    query = Graph.from_edges(3, [(0, 1), (1, 2)], [0]*3)
+    graph = Graph.from_edges(5, [(0, 1), (1, 2), (2, 3)], [0]*5)
+    pruner = ResidualPruner(space_of(query, graph), "forward")
+    frames = [
+        SimpleNamespace(domains={0: frozenset({0, 4}), 1: frozenset({1}), 2: frozenset({2})},
+                        matching=None),
+        SimpleNamespace(domains={0: frozenset({4}), 1: frozenset({1}), 2: frozenset({2})},
+                        matching=None),
+    ]
+    cpu = arc_labels(pruner, frames, None, 2, 1, Random(19))
+    batched = arc_labels(pruner, frames, sparse_adjacency(graph), 2, 2, Random(19))
+    assert [r[0] for r in batched] == [r[0] for r in cpu] == [
+        {0: frozenset({0}), 1: frozenset({1}), 2: frozenset({2})}, None,
+    ]
+    assert sum(r[2] for r in batched) == 1
+    for frame, (reduced, _, _) in zip(frames, batched, strict=True):
+        for action in ("arc", "both", "cascade"):
+            actual = "arc" if reduced is None else run_check(
+                pruner, frame, action, propagate=False, arc_domains=reduced,
+            )
+            assert actual == run_check(pruner, frame, action, propagate=False)
+
+
+def test_neugn_action_head_reuses_only_current_parent_context():
+    from experiments.joint_search import run
+
+    query = Graph.from_edges(5, list(combinations(range(5), 2)), [0]*5)
+    graph = Graph.from_edges(7, list(combinations(range(7), 2)), [0]*7)
+    space = space_of(query, graph)
+    teacher = NeuGN(NeuGNConfig(7, 1, d=8, heads=2, layers=1, ffn=16)).eval()
+    data = vertex_features(graph)
+    args = SimpleNamespace(seconds=None, budget=100, fragment_budget=256, depth=1, device="cpu")
+    seen = []
+
+    class Skip:
+        def costs(self, features, anchor):
+            seen.append((bool(features[-1]), None if anchor is None else len(anchor)))
+            return np.zeros(3)
+
+    forward = run(space, teacher, data, args, "neugn_forward", store_embedding=True)
+    checked = run(space, teacher, data, args, "neugn_head_anchor", store_embedding=True,
+                  neugn_heads={"neugn_head_anchor": Skip()})
+    assert forward["embedding"] == checked["embedding"]
+    assert forward["steps"] == checked["steps"]
+    assert checked["rank_calls"] == checked["anchor_decisions"] == 1
+    assert seen == [(True, 8), (False, None), (False, None)]

@@ -17,16 +17,19 @@ MODEL_ACTIONS = (*CHECK_ACTIONS, *(f"defer_{d}" for d in DEFER_DELAYS))
 
 
 def run_check(pruner, frame, action, *, parent=None, cache=None, residues=None, budget=256,
-              propagate=True, reuse_matching=True, stats=None):
-    """Return a conflict reason, keeping successful propagation on this frame."""
+              propagate=True, reuse_matching=True, stats=None, arc_domains=None):
+    """Return a conflict reason. arc_domains can supply successful AC-3 output."""
     space = pruner.space
     domains = frame.domains
     reduced = domains
     if action in ("arc", "both", "cascade"):
-        reduced = domains.copy()
-        consistent_parent = parent.domains if parent is not None and parent.arc_consistent else None
-        if not pruner.check_arcs(reduced, parent=consistent_parent, residues=residues):
-            return "arc"
+        if arc_domains is None:
+            reduced = domains.copy()
+            consistent_parent = parent.domains if parent is not None and parent.arc_consistent else None
+            if not pruner.check_arcs(reduced, parent=consistent_parent, residues=residues):
+                return "arc"
+        else:
+            reduced = arc_domains
         if propagate:
             frame.domains = reduced
             frame.arc_consistent = True

@@ -77,8 +77,8 @@ class NeuGNReorder:
                 indices = torch.tensor(cands, device=state.device)
                 ranks = (self.model.candidate_logits(state, indices) if self.domain_only
                          else self.model.out(state)[:, indices])
-                s = ranks[0].cpu()
-                state = state[0].cpu()
+                packed = torch.cat((ranks[0], state[0])).cpu()
+                s, state = packed.split((len(cands), state.shape[-1]))
         else:
             s = self.scores(mapping, u, cands)
         order = torch.argsort(-s, stable=True).tolist()

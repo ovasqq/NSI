@@ -30,6 +30,8 @@ class Frame:
     delay: int | None = None
     hidden: np.ndarray | None = None
     support_sizes: dict = field(default_factory=dict)
+    ranking_context: tuple | None = None
+    action_input: tuple | None = None
 
 
 class StateFeatures:
