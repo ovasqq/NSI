@@ -3,7 +3,8 @@
     python -m train.train_neugn --graph hamster [--epochs 1000] [--run NAME]
 
 Writes checkpoints/<graph>/<run>/{config.json, log.jsonl, model.pt}.
-`--resume` continues from model.pt in the same run directory.
+`--resume` continues in the same directory. `--resume-from` starts a new
+run directory from an existing training checkpoint.
 """
 
 from __future__ import annotations
@@ -48,7 +49,21 @@ def load_model(path: Path, device: str | torch.device = "cpu") -> NeuGN:
     return model.to(device).eval()
 
 
-def main() -> None:
+def train_step(model, opt, batch, device):
+    batch = {k: v.to(device) for k, v in batch.items()}
+    logits = model(batch)
+    loss = torch.nn.functional.cross_entropy(logits, batch["target"])
+    opt.zero_grad(set_to_none=True)
+    loss.backward()
+    opt.step()
+    with torch.no_grad():
+        top = logits.topk(min(10, logits.shape[1]), dim=1).indices
+        hit = top == batch["target"][:, None]
+        count = len(batch["target"])
+        return count, loss.item() * count, hit[:, 0].sum().item(), hit.any(1).sum().item()
+
+
+def main(argv=None) -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--graph", default="hamster")
     ap.add_argument("--run", default="default")
@@ -70,8 +85,10 @@ def main() -> None:
     ap.add_argument("--device", default="auto")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--save-every", type=int, default=10)
-    ap.add_argument("--resume", action="store_true")
-    args = ap.parse_args()
+    resume = ap.add_mutually_exclusive_group()
+    resume.add_argument("--resume", action="store_true")
+    resume.add_argument("--resume-from", help="Resume model, optimizer and scheduler into a new run.")
+    args = ap.parse_args(argv)
 
     torch.manual_seed(args.seed)
     device = pick_device(args.device)
@@ -89,16 +106,37 @@ def main() -> None:
         heads=args.heads, ffn=args.ffn, gcn_layers=args.gcn_layers, dropout=args.dropout,
         token_labels=not args.no_token_labels, use_gcn=not args.no_gcn,
     )
+    source = Path(args.resume_from) if args.resume_from else ckpt_path
+    if args.resume_from and (source.resolve() == ckpt_path.resolve() or ckpt_path.exists()
+                             or (run_dir / "log.jsonl").exists()):
+        ap.error("--resume-from needs a fresh output run directory")
+    ck = None
+    if args.resume_from or (args.resume and source.exists()):
+        ck = torch.load(source, map_location="cpu", weights_only=False)
+        if args.resume_from:
+            saved = ck["args"]
+            if saved["graph"] != args.graph:
+                ap.error("source checkpoint belongs to another graph")
+            cfg = NeuGNConfig(**ck["config"])
+            if (cfg.num_g, cfg.num_labels) != (g.n, int(g.labels.max()) + 1):
+                ap.error("source checkpoint graph vocabulary does not match")
+            args.seed, args.min_size, args.max_size = (saved[k] for k in ("seed", "min_size", "max_size"))
+            args.lr, args.gamma = saved["lr"], ck["sched"]["gamma"]
+            for key in ("d", "layers", "heads", "ffn", "gcn_layers", "dropout"):
+                setattr(args, key, getattr(cfg, key))
+            args.no_token_labels, args.no_gcn = not cfg.token_labels, not cfg.use_gcn
+            torch.manual_seed(args.seed)
     model = NeuGN(cfg).to(device)
     opt = torch.optim.Adam(model.parameters(), lr=args.lr)
     sched = torch.optim.lr_scheduler.ExponentialLR(opt, gamma=args.gamma)
     start_epoch = 0
-    if args.resume and ckpt_path.exists():
-        ck = torch.load(ckpt_path, map_location=device, weights_only=False)
+    if ck is not None:
         model.load_state_dict(ck["model"])
         opt.load_state_dict(ck["opt"])
         sched.load_state_dict(ck["sched"])
         start_epoch = ck["epoch"] + 1
+        del ck
+        print(f"Resuming from {source}, {start_epoch} epochs already completed", flush=True)
     (run_dir / "config.json").write_text(json.dumps(dict(model=cfg.to_dict(), args=vars(args)), indent=1))
 
     stream = TrainingStream(g, args.seed, start_epoch, args.min_size, args.max_size)
@@ -115,20 +153,11 @@ def main() -> None:
             t0 = time.time()
             tot_loss = tot_top1 = tot_top10 = tot = 0
             for _ in range(steps):
-                batch = {k: v.to(device) for k, v in next(batches).items()}
-                logits = model(batch)
-                loss = torch.nn.functional.cross_entropy(logits, batch["target"])
-                opt.zero_grad(set_to_none=True)
-                loss.backward()
-                opt.step()
-                with torch.no_grad():
-                    b = len(batch["target"])
-                    top = logits.topk(10, dim=1).indices
-                    hit = top == batch["target"][:, None]
-                    tot_loss += loss.item() * b
-                    tot_top1 += hit[:, 0].sum().item()
-                    tot_top10 += hit.any(1).sum().item()
-                    tot += b
+                count, loss, top1, top10 = train_step(model, opt, next(batches), device)
+                tot += count
+                tot_loss += loss
+                tot_top1 += top1
+                tot_top10 += top10
             sched.step()
             rec = dict(epoch=epoch, loss=tot_loss / tot, top1=tot_top1 / tot,
                        top10=tot_top10 / tot, lr=sched.get_last_lr()[0],
