@@ -92,8 +92,17 @@ def main():
     if not args.checkpoint.is_file() or not args.checkpoint.stat().st_size:
         p.error(f"checkpoint missing or empty: {args.checkpoint}")
     device = pick_device(args.device)
-    if device.type == "cuda" and not torch.cuda.is_available():
-        p.error("CUDA is unavailable")
+    if device.type == "cuda":
+        count = torch.cuda.device_count()
+        if not count:
+            p.error("CUDA is unavailable")
+        ordinal = device.index if device.index is not None else 0
+        if not 0 <= ordinal < count:
+            p.error(f"{device} is outside the {count} visible CUDA devices")
+        device = torch.device("cuda", ordinal)
+        torch.cuda.set_device(device)
+        # The allocator must exist before the first peak-statistics reset.
+        torch.empty(1, device=device)
     torch.set_num_threads(1)
     args.out.mkdir(parents=True, exist_ok=False)
     snapshot = args.out / "source.pt"
