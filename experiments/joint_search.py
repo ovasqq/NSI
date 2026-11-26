@@ -73,7 +73,7 @@ def run(space, teacher, data_features, args, mode, *, light=None, graph_model=No
     pilot_switch = mode == "switch" and getattr(args, "seven_mode_pilot", False)
     capture_anchor = mode == "neugn_head_anchor" or (neugn_forward and observe is not None)
     capture_scores = capture_anchor or mode == "neugn_head_domains"
-    checking = mode not in ("joint_rank", "joint_graph_rank", "neugn_forward") or delay is not None
+    checking = mode not in ("joint_rank", "joint_graph_rank", "neugn_forward", "id_forward") or delay is not None
     if joint:
         representation = StateFeatures(space, data_features)
         cache = ProofCache() if checking and cache_proofs and not neugn_forward else None
@@ -89,6 +89,8 @@ def run(space, teacher, data_features, args, mode, *, light=None, graph_model=No
         return frame.hidden
 
     def rank(depth, u, mapping, local):
+        if mode == "id_forward":
+            return local
         began = perf_counter()
         if neugn_forward:
             ordered = hook(depth, u, mapping, local)
@@ -718,6 +720,8 @@ def main():
     parser.add_argument("--branch-samples", type=int, default=3, help="Maximum sampled viable prefixes per query.")
     parser.add_argument("--seven-mode-pilot", action="store_true",
                         help="Benchmark five NeuGN variants and two structural MLP variants.")
+    parser.add_argument("--id-forward-control", action="store_true",
+                        help="Add an increasing-ID forward-search control to the seven-mode pilot.")
     parser.add_argument("--neugn-heads", action="store_true",
                         help="Add frozen-NeuGN forward and two learned check policies.")
     parser.add_argument("--label-ac3", choices=("cpu", "cuda"), default="cpu")
@@ -728,6 +732,8 @@ def main():
     parser.add_argument("--glasgow-bin", help="Path to a Glasgow Subgraph Solver executable.")
     parser.add_argument("--progress", action=argparse.BooleanOptionalAction, default=True)
     args = parser.parse_args()
+    if args.id_forward_control and not args.seven_mode_pilot:
+        parser.error("--id-forward-control requires --seven-mode-pilot")
     if args.seven_mode_pilot:
         if args.glasgow_bin:
             parser.error("--seven-mode-pilot cannot be combined with --glasgow-bin")
@@ -779,6 +785,8 @@ def main():
     runtime = dict(graph_model=Inference.from_model(graph_model))
     if args.seven_mode_pilot:
         modes = {name: (name, {}) for name in PILOT_MODES}
+        if args.id_forward_control:
+            modes["id_forward"] = ("id_forward", {})
         candidate_modes = {"joint_graph_rank": modes["joint_graph_rank"]}
         joint_reference = "joint_graph_rank"
         calibrated = ("joint_graph",)
@@ -879,6 +887,10 @@ def main():
                                                         "joint_fixed_128", "joint_fixed_256"),
                                               "joint_adaptive"),
             paired_graph_rank=compare_paired(records, ("joint_graph_rank",), "joint_rank"),
+        )
+    if args.id_forward_control:
+        result["paired_vs_id_forward"] = compare_pilot(
+            records, ("neugn_forward", "joint_graph_rank"), "id_forward",
         )
     if args.neugn_heads:
         compare_heads = compare_pilot if args.seven_mode_pilot else compare_paired

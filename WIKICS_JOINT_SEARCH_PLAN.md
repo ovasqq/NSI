@@ -147,3 +147,23 @@ GPU="$GPU_INDEX" EXPERIMENT=joint_search bash experiments/launch_late_check.sh \
 Меню обеих голов включает `skip`, `matching`, `lad` и `forest`. Состояния для обучения собираются отдельным обходом `neugn_forward` на train, с одной разметкой для обеих голов. Порог подбирается на validation по потерям относительно `neugn_forward` и суммарному времени. Голова работает на CPU. Полный `anchor` WikiCS (256 чисел) передаётся вместе с логитами одним копированием. Если родитель не вызывал NeuGN, вход головы получает нулевой вектор и признак отсутствия контекста. Правила кэша доказательств у `joint_*` в этой абляции не применяются.
 
 Режимы выводятся в основные записи и сводку. `paired_neugn_heads_vs_forward` измеряет эффект каждой головы, `paired_neugn_anchor` — добавление контекста NeuGN. `rank_context_seconds` и `anchor_decisions` показывают стоимость подготовки контекста и число решений с доступным `anchor`. Отдельный тест префиксов сохраняет исходный набор политик.
+
+## Сравнение голов NeuGN на WikiCS после пилота DBLP
+
+Сравнение повторяет семь режимов DBLP и добавляет `id_forward`. Этот контроль использует тот же фильтр, порядок вершин запроса и инкрементальные домены, что `neugn_forward`, и перебирает образы по возрастанию ID. Все режимы с NeuGN используют готовый чекпойнт WikiCS после 1 000 эпох. Головы и структурная MLP обучаются на WikiCS.
+
+Предлагаемые параметры совпадают с пилотом DBLP по размерам запросов, числу повторов и бюджетам. Тест берёт индексы 90–109 включительно. Эти запросы лежат между диапазонами калибровки и теста большого прогона WikiCS на 18 режимов.
+
+```bash
+cd ~/subgraph_isomorphism-git
+GPU_INDEX=0
+
+git pull --ff-only origin main &&
+GPU="$GPU_INDEX" EXPERIMENT=joint_search bash experiments/launch_late_check.sh \
+  --seven-mode-pilot --id-forward-control \
+  --sizes 16 24 32 --train-queries 40 --validation-queries 16 \
+  --test-offset 90 --queries 20 --budget 30000 --seconds 1 \
+  --repeats 3 --epochs 6 --branch-queries 0 --label-ac3 cpu --progress
+```
+
+Поле `paired_vs_id_forward` показывает влияние ранжирования NeuGN и структурной MLP на покрытие, время и FMS. `paired_neugn_heads_vs_forward` показывает эффект добавления проверки, а `paired_neugn_anchor` — вклад контекста NeuGN при одном ранжировщике.
