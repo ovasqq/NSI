@@ -1,4 +1,4 @@
-"""Autoregressive selection of three distinct residual query vertices."""
+"""Autoregressive selection of distinct residual query vertices."""
 from math import log1p
 
 import torch
@@ -7,7 +7,7 @@ from torch.distributions import Categorical
 
 
 class TriplePointer(nn.Module):
-    def __init__(self, device, anchor_dim=0, width=32, architecture="attention"):
+    def __init__(self, device, anchor_dim=0, width=32, architecture="attention", variable_size=False):
         super().__init__()
         self.token = nn.Linear(5, width)
         self.architecture = architecture
@@ -22,6 +22,7 @@ class TriplePointer(nn.Module):
                 self.message = nn.Linear(width, width)
         self.anchor = nn.Linear(anchor_dim, width, bias=False) if anchor_dim else None
         self.pointer = nn.Linear(width, width, bias=False)
+        self.stop = nn.Linear(width, 1) if variable_size else None
         self.update = nn.GRUCell(width, width)
         self.to(device)
 
@@ -48,19 +49,30 @@ class TriplePointer(nn.Module):
         selected = []
         logprob = h.new_zeros(())
         mask = torch.zeros(len(vertices), device=device, dtype=torch.bool)
-        for step in range(3):
+        steps = len(vertices) if self.stop is not None else 3
+        for step in range(steps):
             logits = (h @ self.pointer(state)).masked_fill(mask, float('-inf'))
+            can_stop = self.stop is not None and step >= 2
+            if can_stop:
+                logits = torch.cat((logits, self.stop(state)))
             dist = Categorical(logits=logits)
             if witness is not None:
                 valid = torch.tensor([u in witness for u in vertices], device=device) & ~mask
+                if can_stop:
+                    valid = torch.cat((valid, valid.new_tensor([step == len(witness)])))
                 logprob = logprob + torch.logsumexp(dist.logits.masked_fill(~valid, float('-inf')), dim=0)
+                if step == len(witness):
+                    break
                 choice = Categorical(logits=logits.detach().masked_fill(~valid, float('-inf'))).sample()
             else:
                 if forced is not None:
-                    choice = logits.new_tensor(vertices.index(forced[step]), dtype=torch.long)
+                    index = len(vertices) if step == len(forced) else vertices.index(forced[step])
+                    choice = logits.new_tensor(index, dtype=torch.long)
                 else:
                     choice = dist.sample() if sample else logits.argmax()
                 logprob = logprob + dist.log_prob(choice)
+                if can_stop and choice.item() == len(vertices):
+                    break
             selected.append(choice)
             mask = mask.scatter(0, choice.reshape(1), True)
             state = self.update(h.index_select(0, choice.reshape(1)), state.unsqueeze(0))[0]

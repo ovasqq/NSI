@@ -44,3 +44,33 @@ def test_pointer_selects_distinct_vertices_and_replays_log_probability():
     assert set(selected) == {0,2,3}
     (-imitation-actual).backward()
     assert model.relations.weight.grad is not None
+
+
+def test_variable_pointer_replays_stop_and_can_select_the_whole_residual():
+    graph = Graph.from_edges(5, [(0, 1), (1, 2), (2, 3)], [0]*5)
+    domains = {u: frozenset([0, u+1]) for u in range(5)}
+    space = SimpleNamespace(q=graph, cand_set=domains)
+    model = TriplePointer("cpu", variable_size=True)
+    with torch.no_grad():
+        model.stop.weight.zero_()
+        model.stop.bias.fill_(100.)
+    subset, logprob = model(space, domains, None)
+    assert len(set(subset)) == 2
+    _, replayed = model(space, domains, None, forced=subset)
+    torch.testing.assert_close(logprob, replayed)
+    whole, imitation = model(space, domains, None, witness=tuple(domains))
+    assert set(whole) == set(domains)
+    assert imitation.isfinite()
+
+
+def test_fragment_larger_than_four_handles_conflict_and_budget():
+    from search.pruning import check_fragment
+
+    graph = Graph.from_edges(5, [], [0]*5)
+    space = SimpleNamespace(q=graph, g=graph)
+    vertices = tuple(range(5))
+    domains = {u: frozenset(range(4)) for u in vertices}
+    assert check_fragment(space, domains, vertices, 1) is None
+    assert check_fragment(space, domains, vertices, 4096) is False
+    domains[4] = frozenset({4})
+    assert check_fragment(space, domains, vertices, 4096) is True

@@ -197,7 +197,7 @@ def run(space, teacher, data_features, args, mode, *, light=None, graph_model=No
         stats["state_seconds"] += perf_counter()-started
         if neugn_forward and observe is not None and len(new) >= 2:
             frame.action_input = (parent, mapping[u])
-        if triple_policy is not None and len(new) >= 3:
+        if triple_policy is not None and len(new) >= triple_policy.min_size:
             context = parent.ranking_context
             anchor = None if context is None else context[0]
             if triple_policy(space, new, anchor, stats):

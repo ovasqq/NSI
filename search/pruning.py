@@ -302,8 +302,8 @@ def check_fragment(space: SearchSpace, domains: Domains, vertices: tuple[int, ..
     Each candidate inspection costs one unit, including rejected candidates.
     Iterating the original domains keeps even unsuccessful work bounded.
     """
-    if not 2 <= len(vertices) <= 4 or len(set(vertices)) != len(vertices):
-        raise ValueError("expected 2–4 distinct residual vertices")
+    if len(vertices) < 2 or len(set(vertices)) != len(vertices):
+        raise ValueError("expected at least two distinct residual vertices")
     order = sorted(vertices, key=lambda u: (len(domains[u]), u))
     earlier = [[j for j, w in enumerate(order[:i]) if w in space.q.adj_set[u]]
                for i, u in enumerate(order)]
