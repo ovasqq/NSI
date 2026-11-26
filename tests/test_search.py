@@ -341,3 +341,23 @@ def test_motifs_detect_conflicts_that_domains_miss(query_cycle, target_cycle, re
     assert motifs.pruning.motif_checks == 1
     assert motifs.pruning.stages["motifs"].calls == 1
     assert motifs.pruning.cuts == {reason: 1}
+
+
+def test_count_only_preserves_throughput_and_first_match():
+    from types import SimpleNamespace
+
+    from experiments.coverage_portfolio import dynamic_search
+
+    graph = Graph.from_edges(4, [(0, 1), (1, 2), (2, 3), (3, 0)], [0] * 4)
+    query = Graph.from_edges(2, [(0, 1)], [0, 0])
+    space = SearchSpace(query, graph, [np.arange(4), np.arange(4)], [0, 1])
+    result = enumerate_space(space, record_all_match_steps=False, measure_first_match=True)
+    assert result.complete and result.num_matches == 8
+    assert result.match_steps == [2]
+    assert result.first_match_seconds is not None
+
+    limits = SimpleNamespace(seconds=1., budget=None)
+    dynamic = dynamic_search(space, limits, False, count_matches=True, first_match_seconds=.5)
+    assert dynamic["num_matches"] == result.num_matches
+    assert dynamic["fms"] == result.first_match_step
+    assert dynamic["first_match_seconds"] is not None

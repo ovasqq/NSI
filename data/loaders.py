@@ -122,4 +122,8 @@ LOADERS = {"hamster": load_hamster, "lastfm": load_lastfm, "rewired": load_rewir
 
 
 def load(name: str) -> Graph:
+    if name == "nell_planetoid":
+        from data.nell import load_nell_planetoid
+
+        return load_nell_planetoid()
     return LOADERS[name]()

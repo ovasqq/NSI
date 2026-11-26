@@ -69,6 +69,7 @@ class SearchResult:
     timed_out: bool = False
     pruning_policy_seconds: float = 0.0
     subtree_seconds: float = 0.0
+    first_match_seconds: float | None = None
 
     @property
     def first_match_step(self) -> int | None:
@@ -152,6 +153,8 @@ def enumerate_space(
     deep_pruning: DeepPruning | None = None,
     prune_after_steps: int = 0,
     deadline: float | None = None,
+    record_all_match_steps: bool = True,
+    measure_first_match: bool = False,
     pruning_policy: PruningPolicy | None = None,
     branch_observer: BranchObserver | None = None,
     before_check: BranchVisitor | None = None,
@@ -204,6 +207,7 @@ def enumerate_space(
     if fragment is not None and (pruning != "forward" or fragment_budget < 1 or fragment_depth < 1):
         raise ValueError("fragment checks require forward pruning and positive budget and ranking depth")
     n = space.q.n
+    enumeration_started = perf_counter() if measure_first_match else 0.
     order = space.order
     if len(prefix) >= n and prefix:
         raise ValueError("the prefix must leave at least one query vertex unassigned")
@@ -303,7 +307,10 @@ def enumerate_space(
             used.add(v)
             if i + 1 == n:
                 res.num_matches += 1
-                res.match_steps.append(res.steps)
+                if measure_first_match and res.num_matches == 1:
+                    res.first_match_seconds = perf_counter() - enumeration_started
+                if record_all_match_steps or res.num_matches == 1:
+                    res.match_steps.append(res.steps)
                 if store_embeddings:
                     res.embeddings.append(tuple(mapping))
                 if max_matches is not None and res.num_matches >= max_matches:

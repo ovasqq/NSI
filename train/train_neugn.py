@@ -85,10 +85,13 @@ def main(argv=None) -> None:
     ap.add_argument("--device", default="auto")
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--save-every", type=int, default=10)
+    ap.add_argument("--steps-per-epoch", type=int, help="Override epoch length for smoke tests.")
     resume = ap.add_mutually_exclusive_group()
     resume.add_argument("--resume", action="store_true")
     resume.add_argument("--resume-from", help="Resume model, optimizer and scheduler into a new run.")
     args = ap.parse_args(argv)
+    if args.steps_per_epoch is not None and args.steps_per_epoch <= 0:
+        ap.error("--steps-per-epoch must be positive")
 
     torch.manual_seed(args.seed)
     device = pick_device(args.device)
@@ -143,13 +146,15 @@ def main(argv=None) -> None:
     loader = DataLoader(stream, batch_size=args.batch, collate_fn=collate_examples,
                         num_workers=args.workers, persistent_workers=args.workers > 0)
     batches = iter(loader)
-    steps = stream.steps_per_epoch(args.batch)
+    steps = args.steps_per_epoch or stream.steps_per_epoch(args.batch)
     print(f"{args.graph}: {g.n} vertices, {len(stream.starts)} start vertices, "
           f"{steps} steps/epoch, {sum(p.numel() for p in model.parameters()):,} params, {device}")
 
     with open(run_dir / "log.jsonl", "a") as log:
         for epoch in range(start_epoch, args.epochs):
             model.train()
+            if device.type == "cuda":
+                torch.cuda.reset_peak_memory_stats(device)
             t0 = time.time()
             tot_loss = tot_top1 = tot_top10 = tot = 0
             for _ in range(steps):
@@ -162,6 +167,8 @@ def main(argv=None) -> None:
             rec = dict(epoch=epoch, loss=tot_loss / tot, top1=tot_top1 / tot,
                        top10=tot_top10 / tot, lr=sched.get_last_lr()[0],
                        seconds=time.time() - t0)
+            if device.type == "cuda":
+                rec["peak_cuda_reserved_mib"] = round(torch.cuda.max_memory_reserved(device) / 2**20)
             log.write(json.dumps(rec) + "\n")
             log.flush()
             print(f"epoch {epoch:4d}  loss {rec['loss']:.3f}  top1 {rec['top1']:.3f}  "

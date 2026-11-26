@@ -56,7 +56,8 @@ def indexed_space(query, index):
 
 def run(space, teacher, data_features, args, mode, *, light=None, graph_model=None,
         costs=None, observe=None, store_embedding=False, margin=0., delay=None,
-        reuse=True, cache_proofs=True, prefix=(), sample_prefix=None, neugn_heads=None, rank_all_depths=None, triple_policy=None):
+        reuse=True, cache_proofs=True, prefix=(), sample_prefix=None, neugn_heads=None,
+        rank_all_depths=None, triple_policy=None, count_matches=False):
     start = perf_counter()
     deadline = start + args.seconds if args.seconds is not None else None
     pruner = ResidualPruner(space, "forward")
@@ -327,8 +328,11 @@ def run(space, teacher, data_features, args, mode, *, light=None, graph_model=No
         expired = deadline is not None and perf_counter() >= deadline
         result = SearchResult(complete=not expired, timed_out=expired)
     else:
-        result = enumerate_space(space, rank if joint else hook, max_matches=1,
+        enumeration_start = perf_counter()
+        result = enumerate_space(space, rank if joint else hook, max_matches=None if count_matches else 1,
                                  max_steps=args.budget, deadline=deadline,
+                                 record_all_match_steps=not count_matches,
+                                 measure_first_match=count_matches,
                                  store_embeddings=store_embedding, **callbacks)
     if not joint or neugn_forward:
         stats.update(rank_seconds=hook.seconds, rank_calls=hook.calls)
@@ -338,6 +342,9 @@ def run(space, teacher, data_features, args, mode, *, light=None, graph_model=No
         ("closed_immediate", "closed_deferred", "cut_empty", "cache_fragment_cuts", "cache_hall_cuts"))
     return dict(seconds=perf_counter()-start, solved=result.num_matches > 0, outcome=outcome,
                 fms=result.first_match_step, steps=result.steps, timed_out=result.timed_out,
+                num_matches=result.num_matches,
+                first_match_seconds=(enumeration_start-start+result.first_match_seconds
+                                     if result.first_match_seconds is not None else None),
                 embedding=result.embeddings[0] if result.embeddings else None, **stats)
 
 
@@ -612,7 +619,7 @@ def read_queries(args):
 
 
 def benchmark(items, modes, index_filter, teacher, data, args, runtime, path, repetitions,
-              external=None):
+              external=None, *, solver=run, charge_setup=True):
     rng = Random(args.seed)
     records = []
     with path.open("w", buffering=1) as stream:
@@ -643,9 +650,11 @@ def benchmark(items, modes, index_filter, teacher, data, args, runtime, path, re
                     else:
                         mode, options = modes[name]
                         trial_space, setup = prepared[name]
-                        trial_args.seconds = (max(0., common_deadline-setup)
+                        trial_args.seconds = (max(0., common_deadline-(setup if charge_setup else 0.))
                                               if common_deadline is not None else None)
-                        trial = run(trial_space, teacher, data, trial_args, mode, **runtime, **options)
+                        trial = solver(trial_space, teacher, data, trial_args, mode, **runtime, **options)
+                        if trial.get("first_match_seconds") is not None:
+                            trial["first_match_seconds"] += setup
                         trial["seconds"] += setup
                         trial["prepare_seconds"] = setup
                     trials[name].append(trial)

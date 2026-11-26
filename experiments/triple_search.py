@@ -184,7 +184,7 @@ def replay(rows, policies, path):
     return totals
 
 
-def joint_graph_controls(training, validation, index, teacher, data, args):
+def joint_graph_controls(training, validation, index, teacher, data, args, *, rank_only=False):
     with torch.no_grad():
         rank_rows, check_rows, _ = collect(training, index, data, teacher, args)
     model = train_joint(rank_rows, check_rows, graph=True, epochs=args.joint_epochs,
@@ -192,6 +192,8 @@ def joint_graph_controls(training, validation, index, teacher, data, args):
     torch.save(model.state_dict(), args.out/"joint_graph.pt")
     runtime = {"graph_model": Inference.from_model(model)}
     candidates = {"joint_graph_rank": ("joint_graph_rank", {})}
+    if rank_only:
+        return candidates, runtime
     for margin in (0., .5, 1.):
         candidates[f"joint_graph_{margin:g}"] = "joint_graph", {"margin": margin}
     with torch.no_grad():
@@ -202,6 +204,49 @@ def joint_graph_controls(training, validation, index, teacher, data, args):
     best = min((name for name in candidates if name != "joint_graph_rank"),
                key=lambda name: (len(pairs[name]["only_reference"]), summary[name]["seconds"]))
     return {"joint_graph_rank": candidates["joint_graph_rank"], "joint_graph": candidates[best]}, runtime
+
+
+def nell_suite_solver(space, teacher, data, args, mode, *, graph_model, triple_policy=None, count_matches=False):
+    from experiments.coverage_portfolio import dynamic_search, solve
+
+    if mode in ("dynamic", "dynamic_arc"):
+        return dynamic_search(space, args, mode == "dynamic_arc", count_matches=count_matches)
+    if mode == "dynamic_fallback":
+        if not count_matches:
+            return solve(space, teacher, data, args, mode, graph_model=graph_model,
+                         policy=triple_policy, schedule=("dynamic", "graph_triple"), first_share=.2)
+        started = perf_counter()
+        first = dynamic_search(space, args, False, count_matches=True, first_match_seconds=.2 * args.seconds)
+        remaining = args.seconds - (perf_counter() - started)
+        if first["solved"] or not first["timed_out"] or remaining <= 0:
+            return first
+        limits = copy(args)
+        limits.seconds = remaining
+        second = run(space, teacher, data, limits, "joint_graph_rank", graph_model=graph_model,
+                     triple_policy=triple_policy, count_matches=True)
+        second["steps"] += first["steps"]
+        if second["fms"] is not None:
+            second["fms"] += first["steps"]
+        if second["first_match_seconds"] is not None:
+            second["first_match_seconds"] += args.seconds - remaining
+        second["seconds"] = perf_counter() - started
+        return second
+    return run(space, teacher, data, args, mode, graph_model=graph_model,
+               rank_all_depths=not count_matches, triple_policy=triple_policy, count_matches=count_matches)
+
+
+def throughput_summary(records, modes, seconds, *, include_setup=True):
+    result = {}
+    for name in modes:
+        trials = [trial for row in records for trial in row[name]]
+        total = sum(trial["num_matches"] for trial in trials)
+        result[name] = dict(
+            matches=total, runs=len(trials), found_first=sum(trial["solved"] for trial in trials),
+            matches_per_budget_second=total/(seconds*len(trials)),
+            matches_per_elapsed_second=total/sum(
+                trial["seconds"] - (0. if include_setup else trial["prepare_seconds"]) for trial in trials),
+        )
+    return result
 
 
 def main():
@@ -218,7 +263,9 @@ def main():
                         help="Add a learned STOP selector and use the same bounded CPU verifier for all selectors.")
     parser.add_argument("--selectors", nargs="+", choices=("attention", "anchor", "mlp", "message"),
                         default=("attention", "anchor"))
-    parser.add_argument("--graph", choices=("wikics", "hamster"), default="wikics")
+    parser.add_argument("--graph", choices=("wikics", "hamster", "nell_planetoid"), default="wikics")
+    parser.add_argument("--nell-suite", action="store_true",
+                        help="Compare three light methods and four variants of the same NeuGN.")
     parser.add_argument("--sizes", nargs="+", type=int, default=[16,24,32])
     for name, value in dict(train_queries=40, validation_queries=8, queries=20, test_offset=90,
                             budget=30000, repeats=3, samples=2, epochs=4, reward_epochs=2,
@@ -228,6 +275,10 @@ def main():
     parser.add_argument("--seconds", type=float, default=1.)
     parser.add_argument("--progress", action=argparse.BooleanOptionalAction, default=True)
     args = parser.parse_args()
+    if args.nell_suite:
+        if args.structural_ranker or args.rank_step_test:
+            parser.error("--nell-suite compares selectors on NeuGN traces with the fixed suite")
+        args.joint_graph, args.variable_subsets, args.selectors = True, True, ("attention",)
     if args.structural_ranker and (not args.joint_graph or "anchor" in args.selectors):
         parser.error("--structural-ranker requires --joint-graph and selectors without anchor")
     if args.rank_step_test and not args.joint_graph:
@@ -260,7 +311,8 @@ def main():
     training, validation, test = read_queries(args)
     controls, runtime = ({}, {})
     if args.joint_graph:
-        controls, runtime = joint_graph_controls(training, validation, index, teacher, data, args)
+        controls, runtime = joint_graph_controls(training, validation, index, teacher, data, args,
+                                                 rank_only=args.nell_suite)
     ranker = "joint_graph_rank" if args.structural_ranker else "neugn_forward"
     rows = traces(training,index,teacher,data,args,ranker,runtime)
     with (args.out/"training_traces.jsonl").open("w") as stream:
@@ -293,8 +345,21 @@ def main():
     modes = {"forward":("neugn_forward",dict(rank_all_depths=True))}
     modes.update({k:(ranker,dict(rank_all_depths=True,triple_policy=p)) for k,p in policies.items()})
     modes.update(controls)
+    solver = run
+    if args.nell_suite:
+        modes = {
+            "dynamic": ("dynamic", {}),
+            "joint_graph_rank": controls["joint_graph_rank"],
+            "dynamic_fallback": ("dynamic_fallback", {"triple_policy": policies["heuristic"]}),
+            **{name: modes[name] for name in ("forward", "heuristic", "pointer_reward", "pointer_subset_reward")},
+        }
+        # The suite solver controls NeuGN depth according to the evaluation protocol.
+        modes = {name: (mode, {key: value for key, value in options.items() if key != "rank_all_depths"})
+                 for name, (mode, options) in modes.items()}
+        solver = nell_suite_solver
     with torch.no_grad():
-        records = benchmark(test,modes,index,teacher,data,args,runtime,args.out/"test_records.jsonl",args.repeats)
+        records = benchmark(test,modes,index,teacher,data,args,runtime,args.out/"test_records.jsonl",
+                            args.repeats, solver=solver)
     by_group = {f"{size}_{density}": paired_summary(
         [row for row in records if (row["size"], row["density"]) == (size, density)], modes)
         for size in args.sizes for density in ("dense", "sparse")}
@@ -305,10 +370,22 @@ def main():
                   subset_teacher_witnesses=sum(r["subset_witness"] is not None for r in rows),
                   summary=paired_summary(records,modes),
                   by_group=by_group,
-                  joint_graph_margin=modes["joint_graph"][1]["margin"] if args.joint_graph else None,
+                  joint_graph_margin=controls["joint_graph"][1]["margin"] if "joint_graph" in controls else None,
                   paired={base:compare_pilot(records,modes,base) for base in modes})
     (args.out/"results.json").write_text(json.dumps(result,default=str,indent=2)+"\n")
     print({k:(v["solved_by_repeat"],round(v["seconds"],3)) for k,v in result["summary"].items()})
+    if args.nell_suite and 32 in args.sizes:
+        throughput_args = copy(args)
+        throughput_args.depth, throughput_args.budget = 16, None
+        throughput_modes = {
+            name: (mode, {**options, "count_matches": True}) for name, (mode, options) in modes.items()
+        }
+        with torch.no_grad():
+            throughput = benchmark([item for item in test if item[0] == 32], throughput_modes, index,
+                                   teacher, data, throughput_args, runtime,
+                                   args.out/"throughput_records.jsonl", args.repeats, solver=solver)
+        metrics = throughput_summary(throughput, modes, args.seconds)
+        (args.out/"throughput_results.json").write_text(json.dumps(metrics, indent=2)+"\n")
     if args.rank_step_test:
         step_args = copy(args)
         step_args.seconds = None
