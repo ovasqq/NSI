@@ -230,3 +230,32 @@ def test_neugn_action_head_reuses_only_current_parent_context():
     assert forward["steps"] == checked["steps"]
     assert checked["rank_calls"] == checked["anchor_decisions"] == 1
     assert seen == [(True, 8), (False, None), (False, None)]
+
+
+def test_full_depth_neugn_reuses_check_results_on_equal_sibling_domains():
+    from experiments.joint_search import run
+
+    query = Graph.from_edges(4, list(combinations(range(4), 2)), [0]*4)
+    graph = Graph.from_edges(6, [(a, b) for a, b in combinations(range(6), 2)
+                                 if a//2 != b//2], [0]*6)
+    space = space_of(query, graph)
+    teacher = NeuGN(NeuGNConfig(6, 1, d=8, heads=2, layers=1, ffn=16)).eval()
+    args = SimpleNamespace(seconds=None, budget=1000, fragment_budget=256, depth=1,
+                           device="cpu", neugn_full_depth_pilot=True)
+
+    class Forest:
+        def costs(self, features, anchor):
+            return np.array([0., 0., -1.])
+
+    def trial(**options):
+        return run(space, teacher, vertex_features(graph), args, "neugn_head_anchor",
+                   neugn_heads={"neugn_head_anchor": Forest()}, **options)
+
+    cached, uncached = trial(), trial(cache_proofs=False)
+    limited = trial(rank_all_depths=False)
+    assert cached["outcome"] == uncached["outcome"] == "unsat"
+    assert cached["steps"] == uncached["steps"]
+    assert cached["cache_result_hits"] > 0
+    assert cached["check_forest"] + cached["cache_result_hits"] == uncached["check_forest"]
+    assert cached["rank_calls"] > limited["rank_calls"] == 1
+    assert cached["anchor_decisions"] > limited["anchor_decisions"]

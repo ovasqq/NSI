@@ -4,7 +4,7 @@ import argparse
 import json
 import shutil
 import subprocess
-from collections import Counter
+from collections import Counter, OrderedDict
 from copy import copy
 from math import isfinite
 from pathlib import Path
@@ -56,7 +56,7 @@ def indexed_space(query, index):
 
 def run(space, teacher, data_features, args, mode, *, light=None, graph_model=None,
         costs=None, observe=None, store_embedding=False, margin=0., delay=None,
-        reuse=True, cache_proofs=True, prefix=(), sample_prefix=None, neugn_heads=None):
+        reuse=True, cache_proofs=True, prefix=(), sample_prefix=None, neugn_heads=None, rank_all_depths=None):
     start = perf_counter()
     deadline = start + args.seconds if args.seconds is not None else None
     pruner = ResidualPruner(space, "forward")
@@ -74,12 +74,16 @@ def run(space, teacher, data_features, args, mode, *, light=None, graph_model=No
     capture_anchor = mode == "neugn_head_anchor" or (neugn_forward and observe is not None)
     capture_scores = capture_anchor or mode == "neugn_head_domains"
     checking = mode not in ("joint_rank", "joint_graph_rank", "neugn_forward", "id_forward") or delay is not None
+    full_depth_pilot = getattr(args, "neugn_full_depth_pilot", False)
+    all_depths = full_depth_pilot if rank_all_depths is None else rank_all_depths
+    memo = OrderedDict() if full_depth_pilot and mode in NEUGN_HEAD_MODES and cache_proofs else None
     if joint:
         representation = StateFeatures(space, data_features)
-        cache = ProofCache() if checking and cache_proofs and not neugn_forward else None
+        cache = ProofCache() if checking and cache_proofs and (not neugn_forward or memo is not None) else None
         frames[0] = representation.frame(dict(enumerate(space.cand_set)))
     if not joint or neugn_forward:
-        hook = NeuGNReorder(teacher, space.q, None if mode == "neugn_full_domain" else args.depth,
+        rank_limit = None if mode == "neugn_full_domain" or (neugn_forward and all_depths) else args.depth
+        hook = NeuGNReorder(teacher, space.q, rank_limit,
                             args.device, capture_state=capture_anchor, capture_scores=capture_scores,
                             domain_only=neugn_forward or pilot_switch or mode in ("neugn_domain", "neugn_full_domain"))
 
@@ -94,7 +98,7 @@ def run(space, teacher, data_features, args, mode, *, light=None, graph_model=No
         began = perf_counter()
         if neugn_forward:
             ordered = hook(depth, u, mapping, local)
-            if capture_scores and depth < args.depth:
+            if capture_scores and (rank_limit is None or depth < rank_limit):
                 context_started = perf_counter()
                 anchor, scores = hook.ranking_context[depth]
                 frames[depth].ranking_context = (
@@ -120,6 +124,22 @@ def run(space, teacher, data_features, args, mode, *, light=None, graph_model=No
         stats["closure_depth_" + kind] += depth
 
     def proof(depth, frame, action, propagate):
+        if memo is not None:
+            # The three head actions depend only on the residual domains within this query.
+            tick = perf_counter()
+            key = (action, tuple(sorted(frame.domains.items())))
+            if key in memo:
+                reason, matching = memo[key]
+                memo.move_to_end(key)
+                if action == "matching" and reason is None:
+                    frame.matching = matching
+                stats["cache_result_hits"] += 1
+                if reason is not None:
+                    stats["cache_result_cuts"] += 1
+                stats["cache_seconds"] += perf_counter()-tick
+                return reason
+            stats["cache_result_misses"] += 1
+            stats["cache_seconds"] += perf_counter()-tick
         began = perf_counter()
         stats["check_"+action] += 1
         parent = frames.get(depth-1) if reuse else None
@@ -132,6 +152,12 @@ def run(space, teacher, data_features, args, mode, *, light=None, graph_model=No
         if result is not None:
             stats["cut_"+result] += 1
             stats["proved_"+action] += 1
+        if memo is not None:
+            tick = perf_counter()
+            memo[key] = result, frame.matching if action == "matching" else None
+            if len(memo) > 256:
+                memo.popitem(last=False)
+            stats["cache_seconds"] += perf_counter()-tick
         return result
 
     def decision(depth, frame, parent, image):
@@ -720,6 +746,8 @@ def main():
     parser.add_argument("--branch-samples", type=int, default=3, help="Maximum sampled viable prefixes per query.")
     parser.add_argument("--seven-mode-pilot", action="store_true",
                         help="Benchmark five NeuGN variants and two structural MLP variants.")
+    parser.add_argument("--neugn-full-depth-pilot", action="store_true",
+                        help="Train/evaluate full-depth NeuGN heads with per-query caches and paired controls.")
     parser.add_argument("--id-forward-control", action="store_true",
                         help="Add an increasing-ID forward-search control to the seven-mode pilot.")
     parser.add_argument("--neugn-heads", action="store_true",
@@ -732,6 +760,8 @@ def main():
     parser.add_argument("--glasgow-bin", help="Path to a Glasgow Subgraph Solver executable.")
     parser.add_argument("--progress", action=argparse.BooleanOptionalAction, default=True)
     args = parser.parse_args()
+    if args.neugn_full_depth_pilot and not args.seven_mode_pilot:
+        parser.error("--neugn-full-depth-pilot requires --seven-mode-pilot")
     if args.id_forward_control and not args.seven_mode_pilot:
         parser.error("--id-forward-control requires --seven-mode-pilot")
     if args.seven_mode_pilot:
@@ -846,6 +876,10 @@ def main():
             modes[f"joint_fixed_{delay}"] = "joint_rank", {"delay": delay}
         modes["joint_fixed_rebuild"] = "joint_fixed", {"reuse": False}
         modes["joint_fixed_no_cache"] = "joint_fixed", {"cache_proofs": False}
+    if args.neugn_full_depth_pilot:
+        modes["neugn_forward_limited"] = "neugn_forward", {"rank_all_depths": False}
+        for name in NEUGN_HEAD_MODES:
+            modes[name+"_no_cache"] = name, {**modes[name][1], "cache_proofs": False}
     external = None
     if binary is not None:
         (args.out/"glasgow").mkdir()
@@ -888,6 +922,11 @@ def main():
                                               "joint_adaptive"),
             paired_graph_rank=compare_paired(records, ("joint_graph_rank",), "joint_rank"),
         )
+    if args.neugn_full_depth_pilot:
+        result["paired_rank_depth"] = compare_pilot(records, ("neugn_forward",), "neugn_forward_limited")
+        result["paired_head_cache"] = {
+            name: compare_pilot(records, (name,), name+"_no_cache")[name] for name in NEUGN_HEAD_MODES
+        }
     if args.id_forward_control:
         result["paired_vs_id_forward"] = compare_pilot(
             records, ("neugn_forward", "joint_graph_rank"), "id_forward",
