@@ -7,6 +7,7 @@ py="${PYTHON:-.venv-gpu/bin/python}"
 root="${RUN_ROOT:-/raid/ovasqq/neugn-runs}"
 graph=dblp_proxy15
 rank_epochs="${RANK_EPOCHS:-30}"
+rank_batch="${RANK_BATCH:-64}"
 label_ac3="${LABEL_AC3:-cuda}"
 train_queries="${TRAIN_QUERIES:-40}"
 validation_queries="${VALIDATION_QUERIES:-16}"
@@ -37,7 +38,7 @@ printf 'Results %s\n' "$out"
   checkpoint="${CHECKPOINT:-}"
   if [[ -z "$checkpoint" ]]; then
     "$py" -u -m train.train_neugn --graph "$graph" --run "$tag" --device cuda:0 \
-      --epochs "$rank_epochs" --layers 4 --batch 64 --workers 0 --save-every 1
+      --epochs "$rank_epochs" --layers 4 --batch "$rank_batch" --workers 0 --save-every 1
     rank_dir="checkpoints/$graph/$tag"
     checkpoint="$rank_dir/model.pt"
     cp "$rank_dir/config.json" "$out/ranker_config.json"
