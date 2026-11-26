@@ -121,8 +121,10 @@ def test_fragment_proof_can_jump_over_an_irrelevant_assignment():
         return None
 
     baseline = enumerate_space(space, branch_domains=advance, store_embeddings=True)
+    closures = []
     result = enumerate_space(space, branch_domains=advance, backjump_depth=jump,
-                             store_embeddings=True)
+                             ancestor_closed=lambda *event: closures.append(event), store_embeddings=True)
+    assert closures == [("backjump", 1, 1)]
     assert targets == [1]
     assert result.complete and result.embeddings == baseline.embeddings
     assert result.steps < baseline.steps
@@ -155,3 +157,22 @@ def test_joint_adaptive_runs_the_requested_deferred_cascade():
     result = run(space, None, vertex_features(graph), args, "joint_adaptive", light=Defer())
     assert not result["solved"]
     assert result["defer_64"] >= result["check_cascade"] > 0
+    assert result["closure_steps_deferred"] == 64 * result["closed_deferred"]
+    assert result["proved_cascade"] == result["closed_deferred"]
+
+
+def test_replay_same_unsat_prefix_and_censoring():
+    from experiments.joint_search import run
+
+    query = Graph.from_edges(4, [(1, 2), (2, 3), (1, 3)], [0]*4)
+    graph = Graph.from_edges(6, [(u, v) for u in range(3) for v in range(3, 6)], [0]*6)
+    space = space_of(query, graph)
+    args = SimpleNamespace(seconds=None, budget=1000, fragment_budget=256)
+    data = vertex_features(graph)
+    base = run(space, None, data, args, "joint_rank", prefix=(0,))
+    checked = run(space, None, data, args, "joint_fixed", prefix=(0,))
+    assert base["outcome"] == checked["outcome"] == "unsat"
+    assert checked["steps"] == 0 < base["steps"]
+    assert checked["direct_cuts"] == checked["closed_immediate"] == 1
+    args.budget = 1
+    assert run(space, None, data, args, "joint_rank", prefix=(0,))["outcome"] == "step_limit"

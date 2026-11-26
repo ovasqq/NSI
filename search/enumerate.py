@@ -80,8 +80,9 @@ class _Stop(Exception):
 
 
 class _LateCut(Exception):
-    def __init__(self, depth: int):
+    def __init__(self, depth: int, reason: str):
         self.depth = depth
+        self.reason = reason
 
 
 class SearchSpace:
@@ -167,6 +168,7 @@ def enumerate_space(
     late_observer: LateObserver | None = None,
     late_schedule: Callable[[int, Domains], int | None] | None = None,
     backjump_depth: Callable[[int], int | None] | None = None,
+    ancestor_closed: Callable[[str, int, int], None] | None = None,
 ) -> SearchResult:
     """Skip pruning for the first prune_after_steps attempts. The optional
     deadline uses perf_counter(). A prefix contains already assigned data
@@ -223,6 +225,7 @@ def enumerate_space(
             raise _Stop
 
     def with_late_check(i: int, domains: Domains | None = None) -> None:
+        entry_step = res.steps
         ticket = None
         complete = False
         try:
@@ -254,6 +257,8 @@ def enumerate_space(
             if cut.depth != i:
                 raise
             complete = True
+            if ancestor_closed is not None:
+                ancestor_closed(cut.reason, i, res.steps - entry_step)
             for vertex in order[i:]:
                 used.discard(mapping[vertex])
                 mapping[vertex] = -1
@@ -290,7 +295,7 @@ def enumerate_space(
                     if finish is not None:
                         late_finishes[ancestor_depth] = finish
                 if late_check is not None and late_check(ancestor_depth, snapshot):
-                    raise _LateCut(ancestor_depth)
+                    raise _LateCut(ancestor_depth, "deferred")
                 if deadline is not None:
                     check_deadline(deadline)
             res.steps += 1
@@ -362,7 +367,7 @@ def enumerate_space(
                     if ancestor is not None:
                         if not 0 <= ancestor <= i:
                             raise ValueError("backjump must target an active ancestor")
-                        raise _LateCut(ancestor)
+                        raise _LateCut(ancestor, "backjump")
             used.discard(v)
             mapping[u] = -1
 

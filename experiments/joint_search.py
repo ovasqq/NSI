@@ -26,7 +26,7 @@ from models.hook import NeuGNReorder
 from models.joint_dfs import Inference, StateFeatures, train_joint, vertex_features
 from models.pruning_controller import checkpoint_digest
 from queries.storage import load_query_set
-from search.enumerate import SearchSpace, enumerate_space
+from search.enumerate import SearchResult, SearchSpace, enumerate_space
 from search.joint_checks import CHECK_ACTIONS, DEFER_DELAYS, MODEL_ACTIONS, run_check
 from search.nlf_index import NLFIndex
 from search.order import gql_order
@@ -47,7 +47,7 @@ def indexed_space(query, index):
 
 def run(space, teacher, data_features, args, mode, *, light=None, graph_model=None,
         costs=None, observe=None, store_embedding=False, margin=0., delay=None,
-        reuse=True, cache_proofs=True):
+        reuse=True, cache_proofs=True, prefix=(), sample_prefix=None):
     start = perf_counter()
     deadline = start + args.seconds if args.seconds is not None else None
     pruner = ResidualPruner(space, "forward")
@@ -87,18 +87,24 @@ def run(space, teacher, data_features, args, mode, *, light=None, graph_model=No
         stats["rank_seconds"] += perf_counter()-began
         return ordered
 
+    def ancestor_closed(kind, depth, steps):
+        stats["closed_" + kind] += 1
+        stats["closure_steps_" + kind] += steps
+        stats["closure_depth_" + kind] += depth
+
     def proof(depth, frame, action, propagate):
         began = perf_counter()
         stats["check_"+action] += 1
         parent = frames.get(depth-1) if reuse else None
         result = run_check(pruner, frame, action, parent=parent, cache=cache,
                            residues=residues, budget=args.fragment_budget, propagate=propagate,
-                           reuse_matching=reuse)
+                           reuse_matching=reuse, stats=stats)
         elapsed = perf_counter()-began
         stats["check_seconds"] += elapsed
         stats["seconds_"+action] += elapsed
         if result is not None:
             stats["cut_"+result] += 1
+            stats["proved_"+action] += 1
         return result
 
     def decision(depth, frame):
@@ -128,6 +134,8 @@ def run(space, teacher, data_features, args, mode, *, light=None, graph_model=No
         frame = representation.frame(new, parent, (u, mapping[u]))
         frames[depth] = frame
         stats["state_seconds"] += perf_counter()-started
+        if sample_prefix is not None and len(new) >= 2:
+            sample_prefix(depth, mapping)
         if len(new) < 2 or not checking or observe is not None:
             return new
         if cache is not None and cache.entries:
@@ -150,9 +158,13 @@ def run(space, teacher, data_features, args, mode, *, light=None, graph_model=No
             stats["skips"] += 1
             return new
         if proof(depth, frame, action, propagate=True) is not None:
+            stats["closed_immediate"] += 1
+            stats["closure_depth_immediate"] += depth
             return None
         if frame.domains is not new and frame.domains != new:
             started = perf_counter()
+            stats["narrowed_"+action] += 1
+            stats["removed_"+action] += sum(len(new[v])-len(values) for v, values in frame.domains.items())
             updated = representation.frame(frame.domains, parent, (u, mapping[u]))
             updated.arc_consistent, updated.matching = frame.arc_consistent, frame.matching
             frames[depth] = updated
@@ -165,7 +177,7 @@ def run(space, teacher, data_features, args, mode, *, light=None, graph_model=No
         if not cache.entries or depth < 1:
             return None
         started = perf_counter()
-        target = next((i for i in range(depth+1) if cache.conflict(frames[i].domains)), None)
+        target = next((i for i in range(len(prefix), depth+1) if cache.conflict(frames[i].domains)), None)
         stats["cache_seconds"] += perf_counter()-started
         if target is not None:
             stats["backjumps"] += 1
@@ -173,24 +185,40 @@ def run(space, teacher, data_features, args, mode, *, light=None, graph_model=No
         return target
 
     def switch_advance(depth, mapping, used, domains):
+        started = perf_counter()
         u = space.order[depth-1]
         new = (pruner.build_domains(depth, mapping, used) if domains is None
                else pruner.extend_domains(domains, u, mapping[u]))
+        stats["state_seconds"] += perf_counter()-started
+        if new is None:
+            stats["cut_empty"] += 1
         if new is None or depth < args.depth or len(new) < 2:
             return new
         began = perf_counter()
-        _, fragment = select(space, new, "switch", args.threshold, 12)
+        action, fragment = select(space, new, "switch", args.threshold, 12)
         stats["decision_seconds"] += perf_counter()-began
+        stats["decisions"] += 1
         if fragment:
+            stats["check_"+action] += 1
             began = perf_counter()
             outcome = check_selected_fragment(pruner, depth, mapping, used, new, fragment,
                                               args.fragment_budget, incremental=True)
-            stats["check_seconds"] += perf_counter()-began
+            elapsed = perf_counter()-began
+            stats["check_seconds"] += elapsed
+            stats["seconds_"+action] += elapsed
             if outcome is False:
+                stats["cut_fragment"] += 1
+                stats["proved_"+action] += 1
+                stats["closed_immediate"] += 1
+                stats["closure_depth_immediate"] += depth
                 return None
+            if outcome is None:
+                stats["unknown_"+action] += 1
+        else:
+            stats["skips"] += 1
         return new
 
-    callbacks = {}
+    callbacks = dict(ancestor_closed=ancestor_closed)
     if joint:
         callbacks["branch_domains"] = advance
         if cache is not None and observe is None:
@@ -210,12 +238,36 @@ def run(space, teacher, data_features, args, mode, *, light=None, graph_model=No
             )
     elif mode == "switch":
         callbacks["branch_domains"] = switch_advance
-    result = enumerate_space(space, rank if joint else hook, max_matches=1,
-                             max_steps=args.budget, deadline=deadline,
-                             store_embeddings=store_embedding, **callbacks)
+    if prefix:
+        # Reconstruct the unpruned prefix outside the replay clock. Each policy
+        # starts with identical domains and an empty proof cache.
+        mapping = [-1] * space.q.n
+        for depth, image in enumerate(prefix, 1):
+            u = space.order[depth-1]
+            mapping[u] = image
+            if depth < len(prefix):
+                parent = frames[depth-1]
+                child = pruner.extend_domains(parent.domains, u, image)
+                frames[depth] = representation.frame(child, parent, (u, image))
+        start = perf_counter()
+        deadline = start + args.seconds if args.seconds is not None else None
+        domains = advance(len(prefix), mapping, set(prefix), frames[len(prefix)-1].domains)
+        callbacks.update(prefix=prefix, prefix_domains=domains)
+    root_cut = bool(prefix) and callbacks["prefix_domains"] is None
+    if root_cut:
+        expired = deadline is not None and perf_counter() >= deadline
+        result = SearchResult(complete=not expired, timed_out=expired)
+    else:
+        result = enumerate_space(space, rank if joint else hook, max_matches=1,
+                                 max_steps=args.budget, deadline=deadline,
+                                 store_embeddings=store_embedding, **callbacks)
     if not joint:
         stats.update(rank_seconds=hook.seconds, rank_calls=hook.calls)
-    return dict(seconds=perf_counter()-start, solved=result.num_matches > 0,
+    outcome = ("sat" if result.num_matches else "unsat" if result.complete else
+               "timeout" if result.timed_out else "step_limit")
+    stats["direct_cuts"] = sum(stats[key] for key in
+        ("closed_immediate", "closed_deferred", "cut_empty", "cache_fragment_cuts", "cache_hall_cuts"))
+    return dict(seconds=perf_counter()-start, solved=result.num_matches > 0, outcome=outcome,
                 fms=result.first_match_step, steps=result.steps, timed_out=result.timed_out,
                 embedding=result.embeddings[0] if result.embeddings else None, **stats)
 
@@ -316,11 +368,13 @@ def paired_summary(records, modes):
     for mode in modes:
         trials = [r[mode] for r in records]
         solved = [ts[0]["fms"] for ts in trials if ts[0]["fms"] is not None]
-        counters = {key for ts in trials for key in ts[0] if
-                    key.startswith(("check_", "cut_", "defer_", "cache_", "seconds_"))
-                    or key in ("rank_calls", "decisions", "skips", "backjumps", "levels_jumped")}
+        counters = {key for ts in trials for trial in ts for key in trial if
+                    key.startswith(("check_", "cut_", "defer_", "cache_", "seconds_", "closed_", "closure_", "proved_", "unknown_", "narrowed_", "removed_"))
+                    or key in ("rank_calls", "decisions", "skips", "backjumps", "levels_jumped", "direct_cuts")}
         phase_times = ("prepare_seconds", "state_seconds", "rank_seconds", "decision_seconds")
         result[mode] = dict(
+            outcomes_by_repeat=[dict(Counter(ts[i].get("outcome", "unknown") for ts in trials))
+                                for i in range(len(trials[0]))],
             queries=len(trials), solved=sum(ts[0]["solved"] for ts in trials),
             solved_by_repeat=[sum(ts[i]["solved"] for ts in trials) for i in range(len(trials[0]))],
             median_fms_solved=median(solved) if solved else None,
@@ -345,13 +399,14 @@ def glasgow(binary, query_path, graph_path, seconds):
         proc = subprocess.run([binary, "--format", "csv", str(query_path), str(graph_path)],
                               capture_output=True, text=True, timeout=seconds, check=True)
     except subprocess.TimeoutExpired:
-        return dict(seconds=perf_counter()-start, solved=False, timed_out=True, fms=None, steps=None)
+        return dict(seconds=perf_counter()-start, solved=False, outcome="timeout", timed_out=True, fms=None, steps=None)
     fields = {key.strip(): value.strip() for line in proc.stdout.splitlines() if "=" in line
               for key, value in (line.split("=", 1),)}
     status = fields.get("status", "").lower()
     if status not in ("true", "false", "aborted"):
         raise ValueError(f"Unrecognized Glasgow status: {proc.stdout[:500]!r}")
     return dict(seconds=perf_counter()-start, solved=status == "true",
+                outcome={"true": "sat", "false": "unsat", "aborted": "timeout"}[status],
                 timed_out=status == "aborted", fms=None, steps=None)
 
 
@@ -438,6 +493,82 @@ def benchmark(items, modes, index_filter, teacher, data, args, runtime, path, re
     return records
 
 
+def branch_benchmark(test, modes, index, teacher, data, args, runtime):
+    """Compare policies from identical viable prefixes with the same learned ranker."""
+    names = ("joint_rank", "joint_fixed", "joint_tree", "joint_ensemble", "joint_mlp", "joint_adaptive")
+    rng = Random(args.seed)
+    records = []
+    groups = Counter()
+    with (args.out / "branch_trials.jsonl").open("w", buffering=1) as stream:
+        for size, density, query_id, query in tqdm(test, desc="Paired branches", disable=not args.progress):
+            group = size, density
+            if groups[group] >= args.branch_queries:
+                continue
+            groups[group] += 1
+            space = indexed_space(query.graph, index)
+            samples = []
+            seen = 0
+
+            def sample(depth, mapping):
+                nonlocal seen
+                seen += 1
+                slot = seen-1 if seen <= args.branch_samples else rng.randrange(seen)
+                if slot < args.branch_samples:
+                    prefix = tuple(mapping[u] for u in space.order[:depth])
+                    if slot < len(samples):
+                        samples[slot] = prefix
+                    else:
+                        samples.append(prefix)
+
+            run(space, teacher, data, args, "joint_rank", **runtime, sample_prefix=sample)
+            for prefix in samples:
+                trials = {name: [] for name in names}
+                for _ in range(args.repeats):
+                    for name in rng.sample(names, len(names)):
+                        mode, options = modes[name]
+                        trial = run(space, teacher, data, args, mode, **runtime, **options, prefix=prefix)
+                        trials[name].append(trial)
+                outcomes = {r["outcome"] for rows in trials.values() for r in rows}
+                if {"sat", "unsat"} <= outcomes:
+                    raise AssertionError(f"Conflicting proof for query {group}/{query_id} prefix {prefix}")
+                record = dict(size=size, density=density, index=query_id, prefix=prefix,
+                              depth=len(prefix), eligible_seen=seen, trials=trials)
+                stream.write(json.dumps(record)+"\n")
+                records.append(record)
+
+    summary = {}
+    for name in names:
+        repeat_stats = []
+        for i in range(args.repeats):
+            rows = [record["trials"][name][i] for record in records]
+            proved = [r for r in rows if r["outcome"] == "unsat"]
+            comparisons = {}
+            for baseline in ("joint_rank", "joint_fixed"):
+                reference = [record["trials"][baseline][i] for record in records]
+                common = [(r, b) for r, b in zip(rows, reference)
+                          if r["outcome"] == b["outcome"] == "unsat"]
+                comparisons[baseline] = dict(
+                    common_unsat=len(common),
+                    only_mode_unsat=len(proved)-len(common),
+                    only_reference_unsat=sum(r["outcome"] == "unsat" for r in reference)-len(common),
+                    paired_seconds=sum(r["seconds"] for r, _ in common),
+                    paired_reference_seconds=sum(b["seconds"] for _, b in common),
+                    paired_steps=sum(r["steps"] for r, _ in common),
+                    paired_reference_steps=sum(b["steps"] for _, b in common),
+                    median_paired_delta_ms=1000*median(
+                        r["seconds"]-b["seconds"] for r, b in common
+                    ) if common else None,
+                )
+            repeat_stats.append(dict(
+                outcomes=dict(Counter(r["outcome"] for r in rows)),
+                proof_steps_median=median(r["steps"] for r in proved) if proved else None,
+                proof_ms_median=1000*median(r["seconds"] for r in proved) if proved else None,
+                comparisons=comparisons,
+            ))
+        summary[name] = repeat_stats
+    return dict(prefixes=len(records), by_repeat=summary)
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     for name in ("checkpoint", "query-dir", "out"):
@@ -451,6 +582,8 @@ def main():
                            epochs=6, seed=19, threshold=256, fragment_budget=256).items():
         parser.add_argument("--"+key.replace("_", "-"), type=int, default=value)
     parser.add_argument("--seconds", type=float, help="Common end-to-end wall limit per test query.")
+    parser.add_argument("--branch-queries", type=int, default=8, help="Test queries per group for prefix replay; zero disables it.")
+    parser.add_argument("--branch-samples", type=int, default=3, help="Maximum sampled viable prefixes per query.")
     parser.add_argument("--step-value-us", type=float, default=10.)
     parser.add_argument("--glasgow-bin", help="Path to a Glasgow Subgraph Solver executable.")
     parser.add_argument("--progress", action=argparse.BooleanOptionalAction, default=True)
@@ -459,6 +592,8 @@ def main():
            args.budget, args.repeats, args.samples, args.negatives, args.epochs,
            args.threshold, args.fragment_budget) <= 0 or args.seed < 0 or min(args.sizes) < 3:
         parser.error("use positive counts, sizes ≥3 and nonnegative seed")
+    if args.branch_queries < 0 or args.branch_samples < 1:
+        parser.error("invalid branch sampling counts")
     if args.test_offset < args.train_queries+args.validation_queries and not args.test_query_dir:
         parser.error("source splits overlap")
     if len(set(args.sizes)) != len(args.sizes):
@@ -551,9 +686,18 @@ def main():
                   paired_vs_neugn_original=compare_paired(records, modes, "neugn_original"),
                   paired_vs_switch=compare_paired(records, modes, "switch"),
                   paired_vs_fixed=compare_paired(records, modes, "joint_fixed"),
+                  paired_vs_rank=compare_paired(records, ("joint_fixed", "joint_tree", "joint_ensemble",
+                                                         "joint_mlp", "joint_adaptive"), "joint_rank"),
+                  paired_vs_adaptive=compare_paired(records, ("joint_mlp", "joint_fixed_64",
+                                                              "joint_fixed_128", "joint_fixed_256"),
+                                                    "joint_adaptive"),
                   paired_graph_rank=compare_paired(records, ("joint_graph_rank",), "joint_rank"),
                   paired_graph_checks=compare_paired(records, ("joint_graph",), "joint_graph_rank"))
     (args.out/"results.json").write_text(json.dumps(result, indent=2)+"\n")
+    if args.branch_queries:
+        with torch.no_grad():
+            branch_report = branch_benchmark(test, modes, index, teacher, data, args, runtime)
+        (args.out/"branch_summary.json").write_text(json.dumps(branch_report, indent=2)+"\n")
     print(json.dumps(summary, indent=2), flush=True)
 
 

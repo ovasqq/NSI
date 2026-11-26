@@ -17,7 +17,7 @@ MODEL_ACTIONS = (*CHECK_ACTIONS, *(f"defer_{d}" for d in DEFER_DELAYS))
 
 
 def run_check(pruner, frame, action, *, parent=None, cache=None, residues=None, budget=256,
-              propagate=True, reuse_matching=True):
+              propagate=True, reuse_matching=True, stats=None):
     """Return a conflict reason, keeping successful propagation on this frame."""
     space = pruner.space
     domains = frame.domains
@@ -66,9 +66,13 @@ def run_check(pruner, frame, action, *, parent=None, cache=None, residues=None, 
                 selected = selected[1:]
         for fragment in islice(selected, 2):
             if action == "triangle_join":
-                failed = triangle_edge_conflict(space, reduced, fragment, budget) is True
+                outcome = triangle_edge_conflict(space, reduced, fragment, budget)
+                failed = outcome is True
             else:
-                failed = check_fragment(space, reduced, fragment, budget) is False
+                outcome = check_fragment(space, reduced, fragment, budget)
+                failed = outcome is False
+            if outcome is None and stats is not None:
+                stats["unknown_"+action] += 1
             if failed:
                 if cache is not None:
                     cache.add_fragment(fragment, reduced)
