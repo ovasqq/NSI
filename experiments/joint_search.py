@@ -56,7 +56,7 @@ def indexed_space(query, index):
 
 def run(space, teacher, data_features, args, mode, *, light=None, graph_model=None,
         costs=None, observe=None, store_embedding=False, margin=0., delay=None,
-        reuse=True, cache_proofs=True, prefix=(), sample_prefix=None, neugn_heads=None, rank_all_depths=None):
+        reuse=True, cache_proofs=True, prefix=(), sample_prefix=None, neugn_heads=None, rank_all_depths=None, triple_policy=None):
     start = perf_counter()
     deadline = start + args.seconds if args.seconds is not None else None
     pruner = ResidualPruner(space, "forward")
@@ -71,7 +71,8 @@ def run(space, teacher, data_features, args, mode, *, light=None, graph_model=No
     joint = mode not in BASELINES
     neugn_forward = mode in NEUGN_FORWARD_MODES
     pilot_switch = mode == "switch" and getattr(args, "seven_mode_pilot", False)
-    capture_anchor = mode == "neugn_head_anchor" or (neugn_forward and observe is not None)
+    capture_anchor = mode == "neugn_head_anchor" or (neugn_forward and (observe is not None or
+                      getattr(triple_policy, "uses_anchor", False)))
     capture_scores = capture_anchor or mode == "neugn_head_domains"
     checking = mode not in ("joint_rank", "joint_graph_rank", "neugn_forward", "id_forward") or delay is not None
     full_depth_pilot = getattr(args, "neugn_full_depth_pilot", False)
@@ -196,6 +197,12 @@ def run(space, teacher, data_features, args, mode, *, light=None, graph_model=No
         stats["state_seconds"] += perf_counter()-started
         if neugn_forward and observe is not None and len(new) >= 2:
             frame.action_input = (parent, mapping[u])
+        if triple_policy is not None and len(new) >= 3:
+            context = parent.ranking_context
+            anchor = None if context is None else context[0]
+            if triple_policy(space, new, anchor, stats):
+                stats["closed_immediate"] += 1
+                return None
         if sample_prefix is not None and len(new) >= 2:
             sample_prefix(depth, mapping)
         if len(new) < 2 or not checking or observe is not None:

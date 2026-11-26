@@ -10,6 +10,7 @@ experiment="${EXPERIMENT:-late_check_pilot}"
 case "$experiment" in
   late_check_pilot) label=late_check ;;
   joint_search) label=joint_search ;;
+  triple_search) label=triple_search ;;
   *) printf 'Unknown experiment: %s\n' "$experiment" >&2; exit 2 ;;
 esac
 out=$(mktemp -d "$root/wikics_${label}_XXXXXXXX")
